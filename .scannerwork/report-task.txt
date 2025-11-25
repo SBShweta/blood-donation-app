@@ -1,0 +1,6 @@
+projectKey=2401021_Blood_Donation
+serverUrl=http://sonarqube.imcc.com
+serverVersion=25.1.0.102122
+dashboardUrl=http://sonarqube.imcc.com/dashboard?id=2401021_Blood_Donation
+ceTaskId=33a8a71f-24d2-43fb-b487-98c5edbc3d69
+ceTaskUrl=http://sonarqube.imcc.com/api/ce/task?id=33a8a71f-24d2-43fb-b487-98c5edbc3d69
