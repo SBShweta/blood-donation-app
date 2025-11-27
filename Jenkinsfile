@@ -2,15 +2,15 @@ pipeline {
     agent any
 
     environment {
-        SONAR_SCANNER_HOME = tool 'sonar-scanner'
         DOCKER_REGISTRY = "nexus.imcc.com"
         DOCKER_NAMESPACE = "blood-donation"
+        NEXUS_URL = "http://nexus.imcc.com/"
     }
 
     parameters {
         choice(
             name: 'DEPLOY_ENV',
-            choices: ['dev', 'staging', 'prod'],
+            choices: ['dev', 'qa', 'prod'],
             description: 'Select deployment environment'
         )
     }
@@ -31,13 +31,20 @@ pipeline {
             steps {
                 script {
                     env.KUBE_NAMESPACE = "blood-donation-${params.DEPLOY_ENV}"
-                    env.BUILD_TAG = "${env.BUILD_NUMBER}"
-                    
-                    echo "🎯 Deployment Configuration:"
-                    echo "   - Environment: ${params.DEPLOY_ENV}"
-                    echo "   - Namespace: ${env.KUBE_NAMESPACE}"
-                    echo "   - Build: ${env.BUILD_NUMBER}"
+                    echo "🎯 Deployment to: ${env.KUBE_NAMESPACE}"
                 }
+            }
+        }
+
+        stage('Configure NPM') {
+            steps {
+                sh '''
+                    echo "📦 Configuring NPM registry..."
+                    npm config set registry http://nexus.imcc.com/repository/npm-group/
+                    npm config set always-auth true
+                    echo "Node: $(node --version)"
+                    echo "NPM: $(npm --version)"
+                '''
             }
         }
 
@@ -45,12 +52,17 @@ pipeline {
             steps {
                 sh '''
                     echo "📥 Installing backend dependencies..."
-                    npm install || echo "Backend install completed"
-                    
-                    echo "📥 Installing frontend dependencies..."
-                    cd client && npm install || echo "Frontend install completed" && cd ..
-                    
-                    echo "✅ Dependencies installation attempted"
+                    cd client && npm install && cd ..
+                    npm install
+                '''
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                sh '''
+                    echo "🔍 Running SonarQube analysis..."
+                    sonar-scanner -Dproject.settings=sonar-project.properties
                 '''
             }
         }
@@ -58,10 +70,8 @@ pipeline {
         stage('Build Frontend') {
             steps {
                 sh '''
-                    echo "🏗️ Attempting frontend build..."
-                    cd client && npm run build || echo "Frontend build may have issues" && cd ..
-                    
-                    echo "✅ Frontend build attempted"
+                    echo "🏗️ Building frontend..."
+                    cd client && npm run build && cd ..
                 '''
             }
         }
@@ -71,98 +81,87 @@ pipeline {
                 script {
                     echo "🐳 Building Docker images..."
                     
-                    // Build Backend image
                     sh """
-                        docker build -t blood-donation-app-backend:latest -f Dockerfile.backend . || echo "Backend Docker build failed"
+                        docker build -t blood-donation-backend:latest -f Dockerfile.backend .
+                        docker build -t blood-donation-frontend:latest -f client/Dockerfile.frontend ./client
                     """
-                    
-                    // Build Frontend image
-                    sh """
-                        docker build -t blood-donation-app-frontend:latest -f client/Dockerfile.frontend ./client || echo "Frontend Docker build failed"
-                    """
-                    
-                    echo "🐳 Images build attempted:"
-                    sh "docker images | grep blood-donation || echo 'No blood-donation images found'"
                 }
             }
         }
 
-        stage('Test Docker Images') {
+        stage('Push to Nexus') {
             steps {
                 script {
-                    echo "🧪 Testing Docker images..."
-                    
-                    sh '''
-                        echo "Backend image:"
-                        docker images | grep blood-donation-app-backend || echo "Backend image not found"
-                        
-                        echo "Frontend image:"
-                        docker images | grep blood-donation-app-frontend || echo "Frontend image not found"
-                        
-                        echo "MongoDB image:"
-                        docker images | grep mongo || echo "MongoDB image not found"
-                    '''
+                    withCredentials([usernamePassword(
+                        credentialsId: 'nexus-creds',
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASS'
+                    )]) {
+                        sh """
+                            docker login -u $NEXUS_USER -p $NEXUS_PASS ${env.DOCKER_REGISTRY}
+                            docker tag blood-donation-backend:latest ${env.DOCKER_REGISTRY}/${env.DOCKER_NAMESPACE}/blood-donation-backend:${env.BUILD_NUMBER}
+                            docker tag blood-donation-frontend:latest ${env.DOCKER_REGISTRY}/${env.DOCKER_NAMESPACE}/blood-donation-frontend:${env.BUILD_NUMBER}
+                            
+                            docker push ${env.DOCKER_REGISTRY}/${env.DOCKER_NAMESPACE}/blood-donation-backend:${env.BUILD_NUMBER}
+                            docker push ${env.DOCKER_REGISTRY}/${env.DOCKER_NAMESPACE}/blood-donation-frontend:${env.BUILD_NUMBER}
+                        """
+                    }
                 }
             }
         }
 
-        stage('Deploy with Docker Compose') {
+        stage('Deploy to Kubernetes') {
             steps {
                 script {
-                    echo "🚀 Deploying with Docker Compose..."
+                    echo "🚀 Deploying to Kubernetes..."
                     
-                    // Stop and remove existing containers
-                    sh '''
-                        docker-compose down || true
-                    '''
-                    
-                    // Start containers
-                    sh '''
-                        docker-compose up -d || echo "Docker compose may have issues"
-                    '''
-                    
-                    // Check running containers
-                    sh '''
-                        sleep 10
-                        echo "📊 Running containers:"
-                        docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
-                    '''
+                    sh """
+                        # Create namespace
+                        kubectl create namespace ${env.KUBE_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+                        
+                        # Deploy MongoDB
+                        kubectl apply -f k8s/mongo-secret.yaml -n ${env.KUBE_NAMESPACE}
+                        kubectl apply -f k8s/mongo-configmap.yaml -n ${env.KUBE_NAMESPACE}
+                        kubectl apply -f k8s/mongo-deployment.yaml -n ${env.KUBE_NAMESPACE}
+                        kubectl apply -f k8s/mongo-service.yaml -n ${env.KUBE_NAMESPACE}
+                        
+                        # Wait for MongoDB
+                        kubectl wait --for=condition=ready pod -l app=mongodb -n ${env.KUBE_NAMESPACE} --timeout=120s
+                        
+                        # Deploy Backend
+                        kubectl apply -f k8s/backend-deployment.yaml -n ${env.KUBE_NAMESPACE}
+                        kubectl apply -f k8s/backend-service.yaml -n ${env.KUBE_NAMESPACE}
+                        
+                        # Deploy Frontend
+                        kubectl apply -f k8s/frontend-deployment.yaml -n ${env.KUBE_NAMESPACE}
+                        kubectl apply -f k8s/frontend-service.yaml -n ${env.KUBE_NAMESPACE}
+                    """
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    sh """
+                        sleep 30
+                        echo "📊 Deployment Status:"
+                        kubectl get pods -n ${env.KUBE_NAMESPACE}
+                        echo ""
+                        echo "🌐 Services:"
+                        kubectl get svc -n ${env.KUBE_NAMESPACE}
+                    """
                 }
             }
         }
     }
 
     post {
-        always {
-            script {
-                echo "🧹 Cleaning up..."
-                // Safe cleanup commands
-                sh '''
-                    echo "Checking running containers..."
-                    docker ps -a | grep blood-donation || echo "No blood-donation containers running"
-                    
-                    echo "Checking Docker images..."
-                    docker images | grep blood-donation || echo "No blood-donation images found"
-                    
-                    echo "Cleanup completed"
-                '''
-                // Don't use deleteDir() as it causes the context error
-            }
-        }
         success {
-            echo "🎉 PIPELINE SUCCESS!"
-            script {
-                currentBuild.description = "Build ${env.BUILD_NUMBER} - Deployed successfully"
-                
-                echo "📋 Deployment Summary:"
-                echo "   - Frontend: http://localhost:3000"
-                echo "   - Backend: http://localhost:5000"
-                echo "   - MongoDB: localhost:27017"
-            }
+            echo "🎉 PIPELINE SUCCESS! Application deployed to ${env.KUBE_NAMESPACE}"
         }
         failure {
-            echo "💥 PIPELINE FAILED!"
-            echo "🔍 Check the console output for details"
+            echo "💥 PIPELINE FAILED! Check logs above"
         }
     }
 }
