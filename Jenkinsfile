@@ -1,10 +1,6 @@
 pipeline {
     agent any
     
-    tools {
-        hudson.plugins.sonar.SonarRunnerInstallation 'sonar-scanner'
-    }
-    
     environment {
         SONARQUBE_CREDENTIALS_ID = '2401021-SonarQube_token'
         GIT_CREDENTIALS_ID = '21-nexus'
@@ -93,6 +89,12 @@ pipeline {
                     withSonarQubeEnv('sonarqube') {
                         withCredentials([string(credentialsId: "${SONARQUBE_CREDENTIALS_ID}", variable: 'SONAR_TOKEN')]) {
                             sh """
+                            # Install sonar-scanner if not available
+                            if ! command -v sonar-scanner &> /dev/null; then
+                                echo "Installing sonar-scanner..."
+                                npm install -g sonar-scanner
+                            fi
+                            
                             sonar-scanner \
                             -Dsonar.projectKey=2401021_Blood_Donation \
                             -Dsonar.projectName=2401021_Blood_Donation \
