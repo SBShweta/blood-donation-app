@@ -359,378 +359,205 @@
 
 
 pipeline {
-    agent any
-    
-    environment {
-        SONARQUBE_CREDENTIALS_ID = '2401021-SonarQube_token'
-        GIT_CREDENTIALS_ID = '21-nexus'
-        DOCKER_REGISTRY = 'nexus.imcc.com:8082'
-        DOCKER_CREDENTIALS_ID = '21-nexus'
-        NAMESPACE = 'blood-donation'
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins/label: "2401021-blood-donation-agent"
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/os: "linux"
+  volumes:
+    - name: workspace-volume
+      emptyDir: {}
+    - name: kubeconfig-secret
+      secret:
+        secretName: kubeconfig-secret
+  containers:
+    - name: node
+      image: node:18
+      tty: true
+      command: ["cat"]
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+
+    - name: sonar-scanner
+      image: sonarsource/sonar-scanner-cli
+      tty: true
+      command: ["cat"]
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      tty: true
+      command: ["cat"]
+      env:
+        - name: KUBECONFIG
+          value: /kube/config
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: kubeconfig-secret
+          mountPath: /kube/config
+          subPath: kubeconfig
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+
+    - name: dind
+      image: docker:dind
+      args: ["--storage-driver=overlay2", "--insecure-registry=nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"]
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+
+    - name: jnlp
+      image: jenkins/inbound-agent:3345.v03dee9b_f88fc-1
+      env:
+        - name: JENKINS_AGENT_NAME
+          value: "2401021-blood-donation-agent"
+        - name: JENKINS_AGENT_WORKDIR
+          value: "/home/jenkins/agent"
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+'''
+        }
     }
-    
+
+    environment {
+        NAMESPACE = '2401021'
+
+        // Nexus
+        REGISTRY     = 'nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085'
+        APP_NAME     = 'blood-donation'
+        IMAGE_TAG    = 'latest'
+
+        CLIENT_IMAGE = "${REGISTRY}/2401021/${APP_NAME}-client"
+        SERVER_IMAGE = "${REGISTRY}/2401021/${APP_NAME}-server"
+
+        NEXUS_USER = 'admin'
+        NEXUS_PASS = 'Changeme@2025'
+
+        // SonarQube
+        SONAR_PROJECT_KEY   = '2401021_Blood_Donation'
+        SONAR_HOST_URL      = 'http://sonarqube.imcc.com'
+        SONAR_PROJECT_TOKEN = 'sqp_d523987f0289c0a136a5defed7d70c15694ff380'
+    }
+
     stages {
-        // Stage 1: Checkout
-        stage('Checkout Code') {
+
+        stage('Install + Build Frontend') {
             steps {
-                script {
-                    echo "📥 Checking out source code..."
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: '*/main']],
-                        extensions: [],
-                        userRemoteConfigs: [[
-                            credentialsId: "${GIT_CREDENTIALS_ID}",
-                            url: 'https://github.com/SBShweta/blood-donation-app.git'
-                        ]]
-                    ])
-                    echo "✅ Checkout completed!"
-                }
-            }
-        }
-        
-        // Stage 2: Environment Check
-        stage('Environment Check') {
-            steps {
-                script {
-                    echo "🔍 Checking environment and files..."
-                    sh '''
-                    echo "=== File Structure ==="
-                    ls -la
-                    echo ""
-                    echo "=== Checking Directories ==="
-                    [ -d "client" ] && echo "✅ Client directory exists" || echo "❌ Client directory missing"
-                    [ -d "server" ] && echo "✅ Server directory exists" || echo "❌ Server directory missing"
-                    [ -d "k8s" ] && echo "✅ K8s directory exists" || echo "❌ K8s directory missing"
-                    echo ""
-                    echo "=== Checking Dockerfiles ==="
-                    [ -f "client/Dockerfile.frontend" ] && echo "✅ Frontend Dockerfile exists" || echo "❌ Frontend Dockerfile missing"
-                    [ -f "server/Dockerfile.backend" ] && echo "✅ Backend Dockerfile exists" || echo "❌ Backend Dockerfile missing"
-                    echo ""
-                    echo "=== Current Directory ==="
-                    pwd
-                    '''
-                }
-            }
-        }
-        
-        // Stage 3: Install Docker & Tools
-        stage('Install Docker Tools') {
-            steps {
-                script {
-                    echo "🔧 Installing Docker and required tools..."
-                    sh '''
-                    echo "=== Installing Docker ==="
-                    apk update
-                    apk add docker docker-cli curl
-                    
-                    echo "=== Starting Docker Daemon ==="
-                    nohup dockerd > /var/log/docker.log 2>&1 &
-                    echo "Waiting for Docker daemon to start..."
-                    sleep 30
-                    
-                    echo "=== Verifying Docker ==="
-                    docker --version
-                    docker info || echo "Docker daemon still starting..."
-                    
-                    echo "=== Installing kubectl ==="
-                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-                    chmod +x kubectl
-                    mv kubectl /usr/local/bin/
-                    kubectl version --client
-                    
-                    echo "✅ All tools installed successfully!"
-                    '''
-                }
-            }
-        }
-        
-        // Stage 4: SonarQube Scan
-        stage('SonarQube Analysis') {
-            steps {
-                script {
-                    echo "📊 Running SonarQube analysis..."
-                    withSonarQubeEnv('sonarqube') {
+                container('node') {
+                    dir('client') {
                         sh '''
-                        echo "=== Running SonarScanner ==="
-                        sonar-scanner \
-                        -Dsonar.projectKey=2401021_Blood_Donation \
-                        -Dsonar.projectName=2401021_Blood_Donation \
-                        -Dsonar.host.url=http://sonarqube.imcc.com \
-                        -Dsonar.sources=server,client/src \
-                        -Dsonar.exclusions=**/node_modules/**,**/build/**,**/dist/**,**/.scannerwork/** \
-                        -Dsonar.sourceEncoding=UTF-8 \
-                        -Dsonar.language=js
+                        npm install
+                        npm run build
                         '''
                     }
-                    echo "✅ SonarQube analysis completed!"
                 }
             }
         }
-        
-        // Stage 5: Build Docker Images
+
+        stage('Install Backend') {
+            steps {
+                container('node') {
+                    dir('server') {
+                        sh 'npm install'
+                    }
+                }
+            }
+        }
+
         stage('Build Docker Images') {
             steps {
-                script {
-                    echo "🐳 Building Docker images..."
-                    
-                    // Build Frontend Image
-                    sh '''
-                    echo "=== BUILDING FRONTEND DOCKER IMAGE ==="
-                    echo "Current directory:"
-                    pwd
-                    echo "Client directory contents:"
-                    ls -la client/
-                    echo "Starting frontend build..."
-                    cd client
-                    docker build -t blood-donation-app-frontend:latest -f Dockerfile.frontend .
-                    echo "✅ Frontend Docker image built successfully!"
-                    '''
-                    
-                    // Build Backend Image
-                    sh '''
-                    echo "=== BUILDING BACKEND DOCKER IMAGE ==="
-                    echo "Current directory:"
-                    pwd
-                    echo "Server directory contents:"
-                    ls -la server/
-                    echo "Starting backend build..."
-                    cd server
-                    docker build -t blood-donation-app-backend:latest -f Dockerfile.backend .
-                    echo "✅ Backend Docker image built successfully!"
-                    '''
-                    
-                    // Verify Built Images
-                    sh '''
-                    echo "=== VERIFYING BUILT IMAGES ==="
-                    docker images | grep blood-donation
-                    echo "✅ All Docker images built and verified!"
-                    '''
-                }
-            }
-        }
-        
-        // Stage 6: Login to Nexus Registry
-        stage('Login to Nexus') {
-            steps {
-                script {
-                    echo "🔐 Logging into Nexus registry..."
-                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USERNAME')]) {
-                        sh """
-                        echo "Logging into ${DOCKER_REGISTRY}..."
-                        echo "${NEXUS_PASSWORD}" | docker login -u "${NEXUS_USERNAME}" --password-stdin "${DOCKER_REGISTRY}"
-                        """
+                container('dind') {
+                    script {
+
+                        // Fix Dockerfile base images for public.ecr.aws
+                        sh "sed -i 's|FROM node|FROM public.ecr.aws/docker/library/node|g' ./client/Dockerfile.frontend"
+                        sh "sed -i 's|FROM nginx|FROM public.ecr.aws/docker/library/nginx|g' ./client/Dockerfile.frontend"
+                        sh "sed -i 's|FROM node|FROM public.ecr.aws/docker/library/node|g' ./server/Dockerfile.backend"
+
+                        sh '''
+                        # Wait until Docker Daemon in DinD is ready
+                        while ! docker info > /dev/null 2>&1; do sleep 3; done
+
+                        docker build -t ${CLIENT_IMAGE}:${IMAGE_TAG} -f ./client/Dockerfile.frontend ./client
+                        docker build -t ${SERVER_IMAGE}:${IMAGE_TAG} -f ./server/Dockerfile.backend ./server
+                        '''
                     }
-                    echo "✅ Nexus login successful!"
                 }
             }
         }
-        
-        // Stage 7: Tag and Push Images
-        stage('Tag and Push Images') {
+
+        stage('SonarQube Analysis') {
             steps {
-                script {
-                    echo "🏷️ Tagging and pushing Docker images..."
-                    
+                container('sonar-scanner') {
                     sh """
-                    echo "=== TAGGING AND PUSHING FRONTEND ==="
-                    docker tag blood-donation-app-frontend:latest ${DOCKER_REGISTRY}/blood-donation-app-frontend:latest
-                    docker push ${DOCKER_REGISTRY}/blood-donation-app-frontend:latest
-                    echo "✅ Frontend image pushed!"
-                    """
-                    
-                    sh """
-                    echo "=== TAGGING AND PUSHING BACKEND ==="
-                    docker tag blood-donation-app-backend:latest ${DOCKER_REGISTRY}/blood-donation-app-backend:latest
-                    docker push ${DOCKER_REGISTRY}/blood-donation-app-backend:latest
-                    echo "✅ Backend image pushed!"
-                    """
-                    
-                    sh """
-                    echo "=== VERIFYING PUSHED IMAGES ==="
-                    docker images | grep ${DOCKER_REGISTRY}
-                    """
-                    
-                    echo "✅ All images tagged and pushed successfully!"
-                }
-            }
-        }
-        
-        // Stage 8: Create Kubernetes Namespace
-        stage('Create Namespace') {
-            steps {
-                script {
-                    echo "📁 Creating Kubernetes namespace..."
-                    sh """
-                    kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-                    echo "✅ Namespace '${NAMESPACE}' created/verified"
+                    sonar-scanner \
+                      -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                      -Dsonar.sources=. \
+                      -Dsonar.host.url=${SONAR_HOST_URL} \
+                      -Dsonar.login=${SONAR_PROJECT_TOKEN}
                     """
                 }
             }
         }
-        
-        // Stage 9: Create Docker Registry Secrets
-        stage('Create Registry Secrets') {
+
+        stage('Login to Nexus Registry') {
             steps {
-                script {
-                    echo "🔑 Creating Docker registry secrets..."
-                    
-                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USERNAME')]) {
-                        sh """
-                        # Create pull secret for Kubernetes
-                        kubectl create secret docker-registry nexus-pull-secret \\
-                            --docker-server=${DOCKER_REGISTRY} \\
-                            --docker-username=${NEXUS_USERNAME} \\
-                            --docker-password=${NEXUS_PASSWORD} \\
-                            --namespace=${NAMESPACE} \\
-                            --dry-run=client -o yaml | kubectl apply -f -
-                        echo "✅ Nexus pull secret created"
-                        """
-                    }
-                    
-                    echo "✅ Registry secrets created successfully!"
+                container('dind') {
+                    sh """
+                    echo "$NEXUS_PASS" | docker login ${REGISTRY} -u "$NEXUS_USER" --password-stdin
+                    """
                 }
             }
         }
-        
-        // Stage 10: Create Application Secrets
-        stage('Create Application Secrets') {
+
+        stage('Push to Nexus') {
             steps {
-                script {
-                    echo "🔐 Creating application secrets..."
-                    
-                    sh """
-                    # Create JWT secret
-                    kubectl create secret generic jwt-secret \\
-                        --from-literal=JWT_SECRET=blood_donation_super_secure_secret_2024 \\
-                        --namespace=${NAMESPACE} \\
-                        --dry-run=client -o yaml | kubectl apply -f -
-                    echo "✅ JWT secret created"
-                    
-                    # Create MongoDB secret
-                    kubectl create secret generic mongo-secret \\
-                        --from-literal=MONGO_URI=mongodb://mongo-service:27017/blooddonation \\
-                        --namespace=${NAMESPACE} \\
-                        --dry-run=client -o yaml | kubectl apply -f -
-                    echo "✅ MongoDB secret created"
-                    
-                    # Create application config
-                    kubectl create secret generic app-config \\
-                        --from-literal=NODE_ENV=production \\
-                        --from-literal=PORT=5000 \\
-                        --namespace=${NAMESPACE} \\
-                        --dry-run=client -o yaml | kubectl apply -f -
-                    echo "✅ App config secret created"
-                    """
-                    
-                    echo "✅ Application secrets created successfully!"
+                container('dind') {
+                    sh '''
+                    docker push ${CLIENT_IMAGE}:${IMAGE_TAG}
+                    docker push ${SERVER_IMAGE}:${IMAGE_TAG}
+                    '''
                 }
             }
         }
-        
-        // Stage 11: Deploy to Kubernetes
-        stage('Deploy Application') {
+
+        stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    echo "🚀 Deploying application to Kubernetes..."
-                    
+                container('kubectl') {
                     sh """
-                    echo "=== DEPLOYING MONGODB ==="
-                    kubectl apply -f k8s/mongo-deployment.yaml -n ${NAMESPACE}
-                    kubectl apply -f k8s/mongo-service.yaml -n ${NAMESPACE}
-                    echo "✅ MongoDB deployed"
-                    
-                    echo "⏳ Waiting for MongoDB to be ready..."
-                    sleep 40
-                    
-                    echo "=== DEPLOYING BACKEND ==="
-                    kubectl apply -f k8s/backend-deployment.yaml -n ${NAMESPACE}
-                    kubectl apply -f k8s/backend-service.yaml -n ${NAMESPACE}
-                    echo "✅ Backend deployed"
-                    
-                    echo "=== DEPLOYING FRONTEND ==="
-                    kubectl apply -f k8s/frontend-deployment.yaml -n ${NAMESPACE}
-                    kubectl apply -f k8s/frontend-service.yaml -n ${NAMESPACE}
-                    echo "✅ Frontend deployed"
-                    
-                    # Apply ingress if available
-                    if [ -f "k8s/ingress.yaml" ]; then
-                        echo "=== DEPLOYING INGRESS ==="
-                        kubectl apply -f k8s/ingress.yaml -n ${NAMESPACE}
-                        echo "✅ Ingress deployed"
-                    else
-                        echo "ℹ️  No ingress.yaml found, skipping ingress deployment"
-                    fi
+                    kubectl apply -f k8s-deployment.yaml -n ${NAMESPACE}
+                    kubectl apply -f client-service.yaml -n ${NAMESPACE}
+
+                    kubectl set image deployment/client-deployment client=${CLIENT_IMAGE}:${IMAGE_TAG} -n ${NAMESPACE}
+                    kubectl set image deployment/server-deployment server=${SERVER_IMAGE}:${IMAGE_TAG} -n ${NAMESPACE}
+
+                    kubectl rollout status deployment/server-deployment -n ${NAMESPACE}
                     """
-                    
-                    // Wait for deployments to be ready
-                    sh """
-                    echo "⏳ Waiting for all deployments to be ready..."
-                    kubectl rollout status deployment/mongo-deployment -n ${NAMESPACE} --timeout=300s
-                    kubectl rollout status deployment/backend-deployment -n ${NAMESPACE} --timeout=300s
-                    kubectl rollout status deployment/frontend-deployment -n ${NAMESPACE} --timeout=300s
-                    echo "✅ All deployments are ready!"
-                    """
-                    
-                    echo "✅ Application deployed successfully!"
                 }
             }
         }
     }
-    
+
     post {
-        always {
-            echo "🏁 Pipeline execution completed with status: ${currentBuild.currentResult}"
-            script {
-                // Cleanup Docker resources
-                sh '''
-                echo "🧹 Cleaning up Docker resources..."
-                docker system prune -f || true
-                '''
-            }
-        }
-        success {
-            echo "🎉 🎉 🎉 PIPELINE SUCCESS! 🎉 🎉 🎉"
-            script {
-                sh """
-                echo "=== FINAL DEPLOYMENT STATUS ==="
-                kubectl get all -n ${NAMESPACE}
-                echo ""
-                echo "=== SERVICES ==="
-                kubectl get svc -n ${NAMESPACE}
-                echo ""
-                echo "=== PODS ==="
-                kubectl get pods -n ${NAMESPACE} -o wide
-                echo ""
-                echo "=== DEPLOYMENT STATUS ==="
-                kubectl get deployments -n ${NAMESPACE}
-                echo ""
-                echo "✅ Blood Donation App is now running in Kubernetes!"
-                """
-            }
-        }
-        failure {
-            echo "❌ ❌ ❌ PIPELINE FAILED! ❌ ❌ ❌"
-            script {
-                sh """
-                echo "=== TROUBLESHOOTING INFO ==="
-                echo "Recent pod events:"
-                kubectl get events -n ${NAMESPACE} --sort-by='.lastTimestamp' | tail -10
-                echo ""
-                echo "Pod details:"
-                kubectl describe pods -n ${NAMESPACE} || echo "No pods to describe"
-                echo ""
-                echo "Docker images:"
-                docker images | head -10
-                """
-            }
-        }
-        unstable {
-            echo "⚠️ ⚠️ ⚠️ PIPELINE UNSTABLE! ⚠️ ⚠️ ⚠️"
-            echo "SonarQube quality gates may have failed"
-        }
-        aborted {
-            echo "🛑 🛑 🛑 PIPELINE ABORTED! 🛑 🛑 🛑"
-        }
+        success { echo "✅ Pipeline completed successfully!" }
+        failure { echo "❌ Pipeline failed. Check logs!" }
     }
 }
