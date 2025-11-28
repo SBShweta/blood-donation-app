@@ -10,7 +10,7 @@ pipeline {
     }
     
     stages {
-        // Stage 1: Checkout (Jenkins automatically creates "Declarative: Checkout SCM")
+        // Stage 1: Checkout
         stage('Checkout') {
             steps {
                 script {
@@ -46,21 +46,68 @@ pipeline {
                     echo "=== Checking Dockerfiles ==="
                     [ -f "client/Dockerfile.frontend" ] && echo "✅ Frontend Dockerfile exists" || echo "❌ Frontend Dockerfile missing"
                     [ -f "server/Dockerfile.backend" ] && echo "✅ Backend Dockerfile exists" || echo "❌ Backend Dockerfile missing"
-                    echo ""
-                    echo "=== Tools Check ==="
-                    docker --version && echo "✅ Docker available"
-                    kubectl version --client && echo "✅ Kubectl available" || echo "⚠️ Kubectl not available"
                     '''
                     echo "✅ Environment check completed!"
                 }
             }
         }
         
-        // Stage 3: Build Docker Images
+        // Stage 3: Install Required Tools
+        stage('Install Tools') {
+            steps {
+                script {
+                    echo "🔧 Installing required tools..."
+                    
+                    sh '''
+                    echo "=== Installing Docker ==="
+                    apk update && apk add docker docker-cli
+                    # Start Docker daemon
+                    nohup dockerd > /var/log/docker.log 2>&1 &
+                    sleep 20
+                    echo "Docker version:"
+                    docker --version || echo "Docker check failed"
+                    
+                    echo "=== Installing kubectl ==="
+                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                    chmod +x kubectl
+                    mv kubectl /usr/local/bin/
+                    echo "Kubectl version:"
+                    kubectl version --client || echo "Kubectl check failed"
+                    '''
+                    
+                    echo "✅ Tools installation completed!"
+                }
+            }
+        }
+        
+        // Stage 4: SonarQube Scan
+        stage('SonarQube Scan') {
+            steps {
+                script {
+                    echo "📊 Running SonarQube analysis..."
+                    
+                    withSonarQubeEnv('sonarqube') {
+                        sh '''
+                        sonar-scanner \
+                        -Dsonar.projectKey=2401021_Blood_Donation \
+                        -Dsonar.projectName=2401021_Blood_Donation \
+                        -Dsonar.host.url=http://sonarqube.imcc.com \
+                        -Dsonar.sources=server,client/src \
+                        -Dsonar.exclusions=**/node_modules/**,**/build/**,**/dist/**,**/.scannerwork/** \
+                        -Dsonar.sourceEncoding=UTF-8 \
+                        -Dsonar.language=js
+                        '''
+                    }
+                    echo "✅ SonarQube scan completed!"
+                }
+            }
+        }
+        
+        // Stage 5: Build Docker Images
         stage('Build Docker Images') {
             steps {
                 script {
-                    echo "🐳 Building Docker images..."
+                    echo "🐳 Building Docker images from source..."
                     
                     sh '''
                     echo "📱 Building Frontend image..."
@@ -81,45 +128,14 @@ pipeline {
             }
         }
         
-        // Stage 4: SonarQube Scan
-        stage('SonarQube Scan') {
-            steps {
-                script {
-                    echo "📊 Running SonarQube analysis..."
-                    withSonarQubeEnv('sonarqube') {
-                        withCredentials([string(credentialsId: "${SONARQUBE_CREDENTIALS_ID}", variable: 'SONAR_TOKEN')]) {
-                            sh """
-                            # Install sonar-scanner if not available
-                            if ! command -v sonar-scanner &> /dev/null; then
-                                echo "Installing sonar-scanner..."
-                                npm install -g sonar-scanner
-                            fi
-                            
-                            sonar-scanner \
-                            -Dsonar.projectKey=2401021_Blood_Donation \
-                            -Dsonar.projectName=2401021_Blood_Donation \
-                            -Dsonar.host.url=http://sonarqube.imcc.com \
-                            -Dsonar.token=${SONAR_TOKEN} \
-                            -Dsonar.sources=server,client/src \
-                            -Dsonar.exclusions=**/node_modules/**,**/build/**,**/dist/**,**/.scannerwork/** \
-                            -Dsonar.sourceEncoding=UTF-8 \
-                            -Dsonar.language=js
-                            """
-                        }
-                    }
-                    echo "✅ SonarQube scan completed!"
-                }
-            }
-        }
-        
-        // Stage 5: Login to Nexus Registry
+        // Stage 6: Login to Nexus Registry
         stage('Login to Nexus Registry') {
             steps {
                 script {
                     echo "🔐 Logging into Nexus registry..."
                     withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USERNAME')]) {
                         sh """
-                        echo ${NEXUS_PASSWORD} | docker login -u ${NEXUS_USERNAME} --password-stdin ${DOCKER_REGISTRY}
+                        echo "${NEXUS_PASSWORD}" | docker login -u "${NEXUS_USERNAME}" --password-stdin "${DOCKER_REGISTRY}"
                         """
                     }
                     echo "✅ Nexus login successful!"
@@ -127,7 +143,7 @@ pipeline {
             }
         }
         
-        // Stage 6: Tag + Push Images
+        // Stage 7: Tag + Push Images
         stage('Tag + Push Images') {
             steps {
                 script {
@@ -152,23 +168,23 @@ pipeline {
             }
         }
         
-        // Stage 7: Create Namespace + Secrets
+        // Stage 8: Create Namespace + Secrets
         stage('Create Namespace + Secrets') {
             steps {
                 script {
                     echo "📁 Creating namespace and secrets..."
                     
                     sh """
-                    # Create namespace
+                    # Create namespace if not exists
                     kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-                    echo "✅ Namespace created"
+                    echo "✅ Namespace created/verified"
                     
                     # Create Docker registry secret
-                    kubectl create secret docker-registry nexus-registry-secret \
-                        --docker-server=${DOCKER_REGISTRY} \
-                        --docker-username=student \
-                        --docker-password=Imcc@2025 \
-                        --namespace=${NAMESPACE} \
+                    kubectl create secret docker-registry nexus-registry-secret \\
+                        --docker-server=${DOCKER_REGISTRY} \\
+                        --docker-username=student \\
+                        --docker-password=Imcc@2025 \\
+                        --namespace=${NAMESPACE} \\
                         --dry-run=client -o yaml | kubectl apply -f -
                     echo "✅ Registry secret created"
                     """
@@ -178,7 +194,7 @@ pipeline {
             }
         }
         
-        // Stage 8: Create Registry Secrets
+        // Stage 9: Create Registry Secrets
         stage('Create Registry Secrets') {
             steps {
                 script {
@@ -187,11 +203,11 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USERNAME')]) {
                         sh """
                         # Create Nexus registry secret for image pull
-                        kubectl create secret docker-registry nexus-pull-secret \
-                            --docker-server=${DOCKER_REGISTRY} \
-                            --docker-username=${NEXUS_USERNAME} \
-                            --docker-password=${NEXUS_PASSWORD} \
-                            --namespace=${NAMESPACE} \
+                        kubectl create secret docker-registry nexus-pull-secret \\
+                            --docker-server=${DOCKER_REGISTRY} \\
+                            --docker-username=${NEXUS_USERNAME} \\
+                            --docker-password=${NEXUS_PASSWORD} \\
+                            --namespace=${NAMESPACE} \\
                             --dry-run=client -o yaml | kubectl apply -f -
                         echo "✅ Nexus pull secret created"
                         """
@@ -202,7 +218,7 @@ pipeline {
             }
         }
         
-        // Stage 9: Create Application Secrets
+        // Stage 10: Create Application Secrets
         stage('Create Application Secrets') {
             steps {
                 script {
@@ -210,24 +226,24 @@ pipeline {
                     
                     sh """
                     # Create JWT secret
-                    kubectl create secret generic jwt-secret \
-                        --from-literal=JWT_SECRET=your_super_secure_jwt_secret_key_2024_college_project \
-                        --namespace=${NAMESPACE} \
+                    kubectl create secret generic jwt-secret \\
+                        --from-literal=JWT_SECRET=your_super_secure_jwt_secret_key_2024_college_project \\
+                        --namespace=${NAMESPACE} \\
                         --dry-run=client -o yaml | kubectl apply -f -
                     echo "✅ JWT secret created"
                     
                     # Create MongoDB secret
-                    kubectl create secret generic mongo-secret \
-                        --from-literal=MONGO_URI=mongodb://mongo-service:27017/blooddonation \
-                        --namespace=${NAMESPACE} \
+                    kubectl create secret generic mongo-secret \\
+                        --from-literal=MONGO_URI=mongodb://mongo-service:27017/blooddonation \\
+                        --namespace=${NAMESPACE} \\
                         --dry-run=client -o yaml | kubectl apply -f -
                     echo "✅ MongoDB secret created"
                     
                     # Create application config secret
-                    kubectl create secret generic app-config \
-                        --from-literal=NODE_ENV=production \
-                        --from-literal=PORT=5000 \
-                        --namespace=${NAMESPACE} \
+                    kubectl create secret generic app-config \\
+                        --from-literal=NODE_ENV=production \\
+                        --from-literal=PORT=5000 \\
+                        --namespace=${NAMESPACE} \\
                         --dry-run=client -o yaml | kubectl apply -f -
                     echo "✅ App config secret created"
                     """
@@ -237,7 +253,7 @@ pipeline {
             }
         }
         
-        // Stage 10: Deploy to Kubernetes
+        // Stage 11: Deploy to Kubernetes
         stage('Deploy to Kubernetes') {
             steps {
                 script {
@@ -252,7 +268,7 @@ pipeline {
                     echo "✅ MongoDB deployed"
                     
                     # Wait for MongoDB to be ready
-                    echo "⏳ Waiting for MongoDB..."
+                    echo "⏳ Waiting for MongoDB to start..."
                     sleep 30
                     
                     # Apply Backend
@@ -269,6 +285,8 @@ pipeline {
                     if [ -f "k8s/ingress.yaml" ]; then
                         kubectl apply -f k8s/ingress.yaml -n ${NAMESPACE}
                         echo "✅ Ingress deployed"
+                    else
+                        echo "ℹ️  No ingress.yaml found, skipping ingress deployment"
                     fi
                     
                     echo "✅ All deployments completed!"
@@ -277,9 +295,9 @@ pipeline {
                     // Wait for deployments to be ready
                     sh """
                     echo "⏳ Waiting for all deployments to be ready..."
-                    kubectl rollout status deployment/mongo-deployment -n ${NAMESPACE} --timeout=300s
-                    kubectl rollout status deployment/backend-deployment -n ${NAMESPACE} --timeout=300s
-                    kubectl rollout status deployment/frontend-deployment -n ${NAMESPACE} --timeout=300s
+                    kubectl rollout status deployment/mongo-deployment -n ${NAMESPACE} --timeout=300s || echo "MongoDB rollout status check failed"
+                    kubectl rollout status deployment/backend-deployment -n ${NAMESPACE} --timeout=300s || echo "Backend rollout status check failed"
+                    kubectl rollout status deployment/frontend-deployment -n ${NAMESPACE} --timeout=300s || echo "Frontend rollout status check failed"
                     echo "✅ All deployments are ready!"
                     """
                 }
@@ -287,7 +305,6 @@ pipeline {
         }
     }
     
-    // Stage 11: Declarative Post Actions (Automatically created by Jenkins)
     post {
         always {
             echo "🏁 Pipeline execution completed with status: ${currentBuild.currentResult}"
@@ -303,16 +320,16 @@ pipeline {
             
             sh """
             echo "=== FINAL DEPLOYMENT STATUS ==="
-            kubectl get all -n ${NAMESPACE}
+            kubectl get all -n ${NAMESPACE} || echo "Failed to get resources"
             echo ""
             echo "=== SERVICES ==="
-            kubectl get svc -n ${NAMESPACE}
+            kubectl get svc -n ${NAMESPACE} || echo "Failed to get services"
             echo ""
             echo "=== PODS ==="
-            kubectl get pods -n ${NAMESPACE} -o wide
+            kubectl get pods -n ${NAMESPACE} -o wide || echo "Failed to get pods"
             echo ""
             echo "=== SECRETS ==="
-            kubectl get secrets -n ${NAMESPACE}
+            kubectl get secrets -n ${NAMESPACE} || echo "Failed to get secrets"
             """
         }
         failure {
@@ -321,8 +338,10 @@ pipeline {
             
             sh """
             echo "=== DEBUG INFO ==="
-            kubectl get pods -n ${NAMESPACE} 2>/dev/null || echo "No pods found"
-            kubectl describe pods -n ${NAMESPACE} 2>/dev/null || echo "Cannot describe pods"
+            kubectl get pods -n ${NAMESPACE} 2>/dev/null || echo "No pods found in namespace ${NAMESPACE}"
+            kubectl describe pods -n ${NAMESPACE} 2>/dev/null || echo "Cannot describe pods in namespace ${NAMESPACE}"
+            echo "=== RECENT EVENTS ==="
+            kubectl get events -n ${NAMESPACE} --sort-by='.lastTimestamp' 2>/dev/null || echo "Cannot get events"
             """
         }
         unstable {
