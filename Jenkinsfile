@@ -440,7 +440,6 @@ spec:
     environment {
         NAMESPACE = '2401021'
 
-        // Nexus
         REGISTRY     = 'nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085'
         APP_NAME     = 'blood-donation'
         IMAGE_TAG    = 'latest'
@@ -451,7 +450,6 @@ spec:
         NEXUS_USER = 'student'
         NEXUS_PASS = 'Changeme@2025'
 
-        // SonarQube
         SONAR_PROJECT_KEY   = '2401021_Blood_Donation'
         SONAR_HOST_URL      = 'http://sonarqube.imcc.com'
         SONAR_PROJECT_TOKEN = 'sqp_d523987f0289c0a136a5defed7d70c15694ff380'
@@ -486,14 +484,11 @@ spec:
             steps {
                 container('dind') {
                     script {
-
-                        // Fix Dockerfile base images for public.ecr.aws
                         sh "sed -i 's|FROM node|FROM public.ecr.aws/docker/library/node|g' ./client/Dockerfile.frontend"
                         sh "sed -i 's|FROM nginx|FROM public.ecr.aws/docker/library/nginx|g' ./client/Dockerfile.frontend"
                         sh "sed -i 's|FROM node|FROM public.ecr.aws/docker/library/node|g' ./server/Dockerfile.backend"
 
                         sh '''
-                        # Wait until Docker Daemon in DinD is ready
                         while ! docker info > /dev/null 2>&1; do sleep 3; done
 
                         docker build -t ${CLIENT_IMAGE}:${IMAGE_TAG} -f ./client/Dockerfile.frontend ./client
@@ -557,7 +552,11 @@ spec:
     }
 
     post {
-        success { echo "✅ Pipeline completed successfully!" }
-        failure { echo "❌ Pipeline failed. Check logs!" }
-    }
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline failed. Check logs!"
+        }
+    }
 }
