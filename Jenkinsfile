@@ -448,7 +448,7 @@ spec:
         CLIENT_IMAGE = "${REGISTRY}/2401021/${APP_NAME}-client"
         SERVER_IMAGE = "${REGISTRY}/2401021/${APP_NAME}-server"
 
-        NEXUS_USER = 'admin'
+        NEXUS_USER = 'student'
         NEXUS_PASS = 'Changeme@2025'
 
         // SonarQube
