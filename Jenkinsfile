@@ -2,7 +2,7 @@ pipeline {
     agent any
     
     tools {
-        sonarQubeScanner 'sonar-scanner'
+        hudson.plugins.sonar.SonarRunnerInstallation 'sonar-scanner'
     }
     
     environment {
