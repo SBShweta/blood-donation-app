@@ -1,8 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{KUBE_NAMESPACE}}
+  name: blood-donation
   labels:
-    name: {{KUBE_NAMESPACE}}
-    environment: development
-    project: blood-donation-app
+    name: blood-donation
+    environment: production

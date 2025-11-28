@@ -1,167 +1,99 @@
 pipeline {
     agent any
-
+    
     environment {
-        DOCKER_REGISTRY = "nexus.imcc.com"
-        DOCKER_NAMESPACE = "blood-donation"
-        NEXUS_URL = "http://nexus.imcc.com/"
+        DOCKER_REGISTRY = 'nexus.imcc.com:8082'
+        DOCKER_CREDENTIALS = '21-nexus'
+        SONARQUBE_TOKEN = credentials('2401021-SonarQube_token')
+        NAMESPACE = 'blood-donation'
     }
-
-    parameters {
-        choice(
-            name: 'DEPLOY_ENV',
-            choices: ['dev', 'qa', 'prod'],
-            description: 'Select deployment environment'
-        )
-    }
-
-    tools {
-        nodejs 'node18'
-    }
-
+    
     stages {
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
                 git branch: 'main', 
-                url: 'https://github.com/SBShweta/blood-donation-app.git'
+                url: 'https://github.com/SBShweta/blood-donation-app.git',
+                credentialsId: '21-nexus'
             }
         }
-
-        stage('Setup Environment') {
+        
+        stage('SonarQube Analysis') {
             steps {
-                script {
-                    env.KUBE_NAMESPACE = "blood-donation-${params.DEPLOY_ENV}"
-                    echo "🎯 Deployment to: ${env.KUBE_NAMESPACE}"
+                withSonarQubeEnv('sonarqube') {
+                    sh '''
+                    sonar-scanner \
+                    -Dsonar.projectKey=2401021_Blood_Donation \
+                    -Dsonar.projectName=2401021_Blood_Donation \
+                    -Dsonar.host.url=http://sonarqube.imcc.com \
+                    -Dsonar.token=${SONARQUBE_TOKEN} \
+                    -Dsonar.sources=server,client/src \
+                    -Dsonar.exclusions=**/node_modules/**,**/build/**,**/dist/**,**/.scannerwork/**
+                    '''
                 }
             }
         }
-
-        stage('Configure NPM') {
-            steps {
-                sh '''
-                    echo "📦 Configuring NPM registry..."
-                    npm config set registry http://nexus.imcc.com/repository/npm-group/
-                    npm config set always-auth true
-                    echo "Node: $(node --version)"
-                    echo "NPM: $(npm --version)"
-                '''
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                    echo "📥 Installing backend dependencies..."
-                    cd client && npm install && cd ..
-                    npm install
-                '''
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                sh '''
-                    echo "🔍 Running SonarQube analysis..."
-                    sonar-scanner -Dproject.settings=sonar-project.properties
-                '''
-            }
-        }
-
-        stage('Build Frontend') {
-            steps {
-                sh '''
-                    echo "🏗️ Building frontend..."
-                    cd client && npm run build && cd ..
-                '''
-            }
-        }
-
+        
         stage('Build Docker Images') {
             steps {
                 script {
-                    echo "🐳 Building Docker images..."
+                    // Build frontend
+                    sh 'docker build -t blood-donation-app-frontend:latest -f client/Dockerfile.frontend ./client'
                     
-                    sh """
-                        docker build -t blood-donation-backend:latest -f Dockerfile.backend .
-                        docker build -t blood-donation-frontend:latest -f client/Dockerfile.frontend ./client
-                    """
+                    // Build backend  
+                    sh 'docker build -t blood-donation-app-backend:latest -f server/Dockerfile.backend ./server'
                 }
             }
         }
-
+        
         stage('Push to Nexus') {
             steps {
                 script {
-                    withCredentials([usernamePassword(
-                        credentialsId: 'nexus-creds',
-                        usernameVariable: 'NEXUS_USER',
-                        passwordVariable: 'NEXUS_PASS'
-                    )]) {
+                    withCredentials([usernamePassword(credentialsId: '21-nexus', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USERNAME')]) {
+                        // Tag and push frontend
                         sh """
-                            docker login -u $NEXUS_USER -p $NEXUS_PASS ${env.DOCKER_REGISTRY}
-                            docker tag blood-donation-backend:latest ${env.DOCKER_REGISTRY}/${env.DOCKER_NAMESPACE}/blood-donation-backend:${env.BUILD_NUMBER}
-                            docker tag blood-donation-frontend:latest ${env.DOCKER_REGISTRY}/${env.DOCKER_NAMESPACE}/blood-donation-frontend:${env.BUILD_NUMBER}
-                            
-                            docker push ${env.DOCKER_REGISTRY}/${env.DOCKER_NAMESPACE}/blood-donation-backend:${env.BUILD_NUMBER}
-                            docker push ${env.DOCKER_REGISTRY}/${env.DOCKER_NAMESPACE}/blood-donation-frontend:${env.BUILD_NUMBER}
+                        docker tag blood-donation-app-frontend:latest ${DOCKER_REGISTRY}/blood-donation-app-frontend:latest
+                        docker login -u ${NEXUS_USERNAME} -p ${NEXUS_PASSWORD} ${DOCKER_REGISTRY}
+                        docker push ${DOCKER_REGISTRY}/blood-donation-app-frontend:latest
+                        """
+                        
+                        // Tag and push backend
+                        sh """
+                        docker tag blood-donation-app-backend:latest ${DOCKER_REGISTRY}/blood-donation-app-backend:latest
+                        docker push ${DOCKER_REGISTRY}/blood-donation-app-backend:latest
                         """
                     }
                 }
             }
         }
-
+        
         stage('Deploy to Kubernetes') {
             steps {
                 script {
-                    echo "🚀 Deploying to Kubernetes..."
+                    // Create namespace if not exists
+                    sh "kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
                     
-                    sh """
-                        # Create namespace
-                        kubectl create namespace ${env.KUBE_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-                        
-                        # Deploy MongoDB
-                        kubectl apply -f k8s/mongo-secret.yaml -n ${env.KUBE_NAMESPACE}
-                        kubectl apply -f k8s/mongo-configmap.yaml -n ${env.KUBE_NAMESPACE}
-                        kubectl apply -f k8s/mongo-deployment.yaml -n ${env.KUBE_NAMESPACE}
-                        kubectl apply -f k8s/mongo-service.yaml -n ${env.KUBE_NAMESPACE}
-                        
-                        # Wait for MongoDB
-                        kubectl wait --for=condition=ready pod -l app=mongodb -n ${env.KUBE_NAMESPACE} --timeout=120s
-                        
-                        # Deploy Backend
-                        kubectl apply -f k8s/backend-deployment.yaml -n ${env.KUBE_NAMESPACE}
-                        kubectl apply -f k8s/backend-service.yaml -n ${env.KUBE_NAMESPACE}
-                        
-                        # Deploy Frontend
-                        kubectl apply -f k8s/frontend-deployment.yaml -n ${env.KUBE_NAMESPACE}
-                        kubectl apply -f k8s/frontend-service.yaml -n ${env.KUBE_NAMESPACE}
-                    """
-                }
-            }
-        }
-
-        stage('Verify Deployment') {
-            steps {
-                script {
-                    sh """
-                        sleep 30
-                        echo "📊 Deployment Status:"
-                        kubectl get pods -n ${env.KUBE_NAMESPACE}
-                        echo ""
-                        echo "🌐 Services:"
-                        kubectl get svc -n ${env.KUBE_NAMESPACE}
-                    """
+                    // Apply Kubernetes manifests
+                    sh "kubectl apply -f k8s/ -n ${NAMESPACE}"
+                    
+                    // Wait for deployment to be ready
+                    sh "kubectl rollout status deployment/frontend-deployment -n ${NAMESPACE} --timeout=300s"
+                    sh "kubectl rollout status deployment/backend-deployment -n ${NAMESPACE} --timeout=300s"
                 }
             }
         }
     }
-
+    
     post {
+        always {
+            // Clean up Docker images
+            sh 'docker system prune -f'
+        }
         success {
-            echo "🎉 PIPELINE SUCCESS! Application deployed to ${env.KUBE_NAMESPACE}"
+            echo 'Deployment completed successfully!'
+            sh "kubectl get all -n ${NAMESPACE}"
         }
         failure {
-            echo "💥 PIPELINE FAILED! Check logs above"
+            echo 'Deployment failed!'
         }
     }
 }
