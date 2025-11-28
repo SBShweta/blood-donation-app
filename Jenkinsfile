@@ -368,10 +368,6 @@ metadata:
   labels:
     jenkins/label: "2401021-blood-donation-agent"
 spec:
-  hostAliases:
-  - ip: "10.0.0.100"  # REPLACE WITH ACTUAL SONARQUBE SERVER IP - get it using: nslookup sonarqube.imcc.com
-    hostnames:
-    - "sonarqube.imcc.com"
   restartPolicy: Never
   nodeSelector:
     kubernetes.io/os: "linux"
@@ -380,7 +376,7 @@ spec:
       emptyDir: {}
     - name: kubeconfig-secret
       secret:
-        secretName: "kubeconfig-secret"
+        secretName: kubeconfig-secret
   containers:
     - name: node
       image: node:18
@@ -391,7 +387,7 @@ spec:
           mountPath: /home/jenkins/agent
 
     - name: sonar-scanner
-      image: sonarsource/sonar-scanner-cli:latest
+      image: sonarsource/sonar-scanner-cli
       tty: true
       command: ["cat"]
       volumeMounts:
@@ -410,15 +406,13 @@ spec:
       volumeMounts:
         - name: kubeconfig-secret
           mountPath: /kube/config
-          subPath: "kubeconfig"
+          subPath: kubeconfig
         - name: workspace-volume
           mountPath: /home/jenkins/agent
 
     - name: dind
       image: docker:dind
-      args: 
-        - "--storage-driver=overlay2"
-        - "--insecure-registry=nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"
+      args: ["--storage-driver=overlay2", "--insecure-registry=nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"]
       securityContext:
         privileged: true
       volumeMounts:
@@ -428,16 +422,10 @@ spec:
     - name: jnlp
       image: jenkins/inbound-agent:3345.v03dee9b_f88fc-1
       env:
-        - name: JENKINS_SECRET
-          value: "********"
-        - name: JENKINS_TUNNEL
-          value: "my-jenkins-agent.jenkins.svc.cluster.local:50000"
         - name: JENKINS_AGENT_NAME
           value: "2401021-blood-donation-agent"
         - name: JENKINS_AGENT_WORKDIR
           value: "/home/jenkins/agent"
-        - name: JENKINS_URL
-          value: "http://my-jenkins.jenkins.svc.cluster.local:8080/"
       resources:
         requests:
           cpu: "100m"
@@ -457,8 +445,8 @@ spec:
         APP_NAME     = 'blood-donation'
         IMAGE_TAG    = 'latest'
 
-        CLIENT_IMAGE = "${REGISTRY}/${NAMESPACE}/${APP_NAME}-client"
-        SERVER_IMAGE = "${REGISTRY}/${NAMESPACE}/${APP_NAME}-server"
+        CLIENT_IMAGE = "${REGISTRY}/2401021/${APP_NAME}-client"
+        SERVER_IMAGE = "${REGISTRY}/2401021/${APP_NAME}-server"
 
         NEXUS_USER = 'student'
         NEXUS_PASS = 'Changeme@2025'
@@ -470,20 +458,13 @@ spec:
     }
 
     stages {
-        stage('Declarative: Checkout SCM') {
-            steps {
-                checkout scm
-            }
-        }
 
         stage('Install + Build Frontend') {
             steps {
                 container('node') {
                     dir('client') {
                         sh '''
-                        echo "Installing frontend dependencies..."
                         npm install
-                        echo "Building frontend..."
                         npm run build
                         '''
                     }
@@ -495,10 +476,7 @@ spec:
             steps {
                 container('node') {
                     dir('server') {
-                        sh '''
-                        echo "Installing backend dependencies..."
-                        npm install
-                        '''
+                        sh 'npm install'
                     }
                 }
             }
@@ -508,47 +486,20 @@ spec:
             steps {
                 container('dind') {
                     script {
-                        // Test Docker daemon first
-                        sh '''
-                        echo "Waiting for Docker daemon to be ready..."
-                        timeout 60s bash -c 'until docker info > /dev/null 2>&1; do sleep 3; echo "Waiting for Docker daemon..."; done'
-                        echo "Docker daemon is ready!"
-                        '''
-                        
+
                         // Fix Dockerfile base images for public.ecr.aws
                         sh "sed -i 's|FROM node|FROM public.ecr.aws/docker/library/node|g' ./client/Dockerfile.frontend"
                         sh "sed -i 's|FROM nginx|FROM public.ecr.aws/docker/library/nginx|g' ./client/Dockerfile.frontend"
                         sh "sed -i 's|FROM node|FROM public.ecr.aws/docker/library/node|g' ./server/Dockerfile.backend"
 
                         sh '''
-                        echo "Building client Docker image..."
+                        # Wait until Docker Daemon in DinD is ready
+                        while ! docker info > /dev/null 2>&1; do sleep 3; done
+
                         docker build -t ${CLIENT_IMAGE}:${IMAGE_TAG} -f ./client/Dockerfile.frontend ./client
-                        
-                        echo "Building server Docker image..."
                         docker build -t ${SERVER_IMAGE}:${IMAGE_TAG} -f ./server/Dockerfile.backend ./server
-                        
-                        echo "Docker images built successfully:"
-                        docker images | grep ${REGISTRY}/${NAMESPACE}
                         '''
                     }
-                }
-            }
-        }
-
-        stage('Test SonarQube Connectivity') {
-            steps {
-                container('sonar-scanner') {
-                    sh '''
-                    echo "Testing SonarQube DNS resolution..."
-                    nslookup sonarqube.imcc.com || echo "DNS resolution failed"
-                    
-                    echo "Testing SonarQube connectivity..."
-                    if curl -s --connect-timeout 10 http://sonarqube.imcc.com/ > /dev/null; then
-                        echo "✅ SonarQube is reachable"
-                    else
-                        echo "❌ SonarQube is not reachable"
-                    fi
-                    '''
                 }
             }
         }
@@ -557,13 +508,11 @@ spec:
             steps {
                 container('sonar-scanner') {
                     sh """
-                    echo "Starting SonarQube analysis..."
                     sonar-scanner \
                       -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                       -Dsonar.sources=. \
                       -Dsonar.host.url=${SONAR_HOST_URL} \
                       -Dsonar.login=${SONAR_PROJECT_TOKEN}
-                    echo "SonarQube analysis completed!"
                     """
                 }
             }
@@ -573,9 +522,7 @@ spec:
             steps {
                 container('dind') {
                     sh """
-                    echo "Logging into Nexus registry..."
                     echo "$NEXUS_PASS" | docker login ${REGISTRY} -u "$NEXUS_USER" --password-stdin
-                    echo "✅ Successfully logged into Nexus registry"
                     """
                 }
             }
@@ -585,13 +532,8 @@ spec:
             steps {
                 container('dind') {
                     sh '''
-                    echo "Pushing client image to Nexus..."
                     docker push ${CLIENT_IMAGE}:${IMAGE_TAG}
-                    
-                    echo "Pushing server image to Nexus..."
                     docker push ${SERVER_IMAGE}:${IMAGE_TAG}
-                    
-                    echo "✅ Images pushed successfully to Nexus"
                     '''
                 }
             }
@@ -601,26 +543,13 @@ spec:
             steps {
                 container('kubectl') {
                     sh """
-                    echo "Deploying to Kubernetes namespace: ${NAMESPACE}"
-                    
-                    # Apply deployment files
-                    kubectl apply -f k8s-deployment.yaml -n ${NAMESPACE} --validate=false
-                    kubectl apply -f client-service.yaml -n ${NAMESPACE} --validate=false
-                    
-                    # Update images
-                    kubectl set image deployment/client-deployment client=${CLIENT_IMAGE}:${IMAGE_TAG} -n ${NAMESPACE} --validate=false
-                    kubectl set image deployment/server-deployment server=${SERVER_IMAGE}:${IMAGE_TAG} -n ${NAMESPACE} --validate=false
-                    
-                    # Wait for rollout
-                    echo "Waiting for deployment rollout..."
-                    kubectl rollout status deployment/client-deployment -n ${NAMESPACE} --timeout=300s
-                    kubectl rollout status deployment/server-deployment -n ${NAMESPACE} --timeout=300s
-                    
-                    echo "✅ Deployment completed successfully!"
-                    
-                    # Show deployment status
-                    kubectl get deployments -n ${NAMESPACE}
-                    kubectl get pods -n ${NAMESPACE}
+                    kubectl apply -f k8s-deployment.yaml -n ${NAMESPACE}
+                    kubectl apply -f client-service.yaml -n ${NAMESPACE}
+
+                    kubectl set image deployment/client-deployment client=${CLIENT_IMAGE}:${IMAGE_TAG} -n ${NAMESPACE}
+                    kubectl set image deployment/server-deployment server=${SERVER_IMAGE}:${IMAGE_TAG} -n ${NAMESPACE}
+
+                    kubectl rollout status deployment/server-deployment -n ${NAMESPACE}
                     """
                 }
             }
@@ -628,52 +557,7 @@ spec:
     }
 
     post {
-        always {
-            echo "Pipeline execution completed - Result: ${currentBuild.result}"
-            container('kubectl') {
-                sh '''
-                echo "Final deployment status:"
-                kubectl get pods -n ${NAMESPACE} || true
-                '''
-            }
-        }
-        success {
-            echo "✅ Pipeline completed successfully!"
-            emailext (
-                subject: "✅ Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
-                The Jenkins pipeline completed successfully!
-                
-                Job: ${env.JOB_NAME}
-                Build: #${env.BUILD_NUMBER}
-                URL: ${env.BUILD_URL}
-                
-                SonarQube Analysis: ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}
-                """,
-                to: "student@example.com"
-            )
-        }
-        failure {
-            echo "❌ Pipeline failed!"
-            emailext (
-                subject: "❌ Pipeline FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
-                The Jenkins pipeline failed!
-                
-                Job: ${env.JOB_NAME}
-                Build: #${env.BUILD_NUMBER}
-                URL: ${env.BUILD_URL}
-                
-                Please check the logs for details.
-                """,
-                to: "student@example.com"
-            )
-        }
-        unstable {
-            echo "Pipeline unstable!"
-        }
-        changed {
-            echo "Pipeline status changed!"
-        }
-    }
+        success { echo "✅ Pipeline completed successfully!" }
+        failure { echo "❌ Pipeline failed. Check logs!" }
+    }
 }
