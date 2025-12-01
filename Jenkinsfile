@@ -88,13 +88,14 @@ spec:
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                    withCredentials([string(credentialsId: '2401021', variable: 'SONAR_TOKEN')]) {
-                        sh """
+                     withCredentials([string(credentialsId: '2401021', variable: 'SONAR_TOKEN')]) {
+                        sh '''
                             sonar-scanner \
-                            -Dsonar.projectKey=2401021_Blood-Donation \
-                            -Dsonar.host.url=${SONAR_URL} \
-                            -Dsonar.login=$SONAR_TOKEN
-                        """
+                                -Dsonar.projectKey=2401021_Blood_Donation \
+                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
+                                -Dsonar.login=$SONAR_TOKEN \
+                                -Dsonar.python.coverage.reportPaths=coverage.xml
+                        '''
                     }
                 }
             }
