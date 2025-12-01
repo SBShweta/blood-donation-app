@@ -135,7 +135,7 @@ spec:
             steps {
                 container('kubectl') {
                     sh """
-                        kubectl apply -f k8s/deployement.yaml
+                        kubectl apply -f k8s/deployment.yaml
                         
                     """
                 }
