@@ -6,6 +6,7 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
+
   - name: sonar-scanner
     image: sonarsource/sonar-scanner-cli
     command: ["cat"]
@@ -15,12 +16,9 @@ spec:
     image: bitnami/kubectl:latest
     command: ["cat"]
     tty: true
-    securityContext:
-      runAsUser: 0
-      readOnlyRootFilesystem: false
     env:
     - name: KUBECONFIG
-      value: /kube/config        
+      value: /kube/config
     volumeMounts:
     - name: kubeconfig-secret
       mountPath: /kube/config
@@ -42,7 +40,6 @@ spec:
   - name: docker-config
     configMap:
       name: docker-daemon-config
-
   - name: kubeconfig-secret
     secret:
       secretName: kubeconfig-secret
@@ -50,25 +47,30 @@ spec:
         }
     }
 
+    environment {
+        REGISTRY = "nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"
+        BACKEND_IMAGE = "blood-donation/blood-donation-backend"
+        FRONTEND_IMAGE = "blood-donation/blood-donation-frontend"
+    }
+
     stages {
 
-        stage('Build Docker Image') {
+        stage('Build Backend Docker Image') {
             steps {
                 container('dind') {
                     sh """
-                        sleep 10
-                        docker build -t blood-donation-app:latest .
-                        docker image ls
+                        sleep 8
+                        docker build -t ${BACKEND_IMAGE}:latest -f server/Dockerfile.backend server
                     """
                 }
             }
         }
 
-        stage('Run Tests') {
+        stage('Build Frontend Docker Image') {
             steps {
                 container('dind') {
                     sh """
-                        docker run --rm blood-donation-app:latest npm test || true
+                        docker build -t ${FRONTEND_IMAGE}:latest -f client/Dockerfile.frontend client
                     """
                 }
             }
@@ -77,17 +79,18 @@ spec:
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                    withCredentials([string(credentialsId: 'sqp_d523987f0289c0a136a5defed7d70c15694ff380', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([
+                        string(credentialsId: 'sonar-token-2401021', variable: 'SONAR_TOKEN')
+                    ]) {
                         sh """
-                            sonar-scanner \
-                                -Dsonar.projectKey=2401021_Blood_Donation \
-                                -Dsonar.projectName=2401021_Blood_Donation \
-                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
-                                -Dsonar.login=$SONAR_TOKEN \
-                                -Dsonar.sources=. \
-                                -Dsonar.language=js \
-                                -Dsonar.sourceEncoding=UTF-8 \
-                                -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+                        sonar-scanner \
+                            -Dsonar.projectKey=2401021_Blood_Donation \
+                            -Dsonar.projectName=2401021_Blood_Donation \
+                            -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
+                            -Dsonar.login=$SONAR_TOKEN \
+                            -Dsonar.sources=./server,./client \
+                            -Dsonar.language=js \
+                            -Dsonar.sourceEncoding=UTF-8
                         """
                     }
                 }
@@ -98,36 +101,37 @@ spec:
             steps {
                 container('dind') {
                     sh """
-                        docker login nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085 \
-                        -u admin -p Changeme@2025
+                        docker login ${REGISTRY} -u admin -p Changeme@2025
                     """
                 }
             }
         }
 
-        stage('Tag & Push Image to Nexus') {
+        stage('Tag & Push Docker Images') {
             steps {
                 container('dind') {
                     sh """
-                        docker tag blood-donation-app:latest \
-                        nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/blood-donation/blood-donation-app:latest
+                        docker tag ${BACKEND_IMAGE}:latest ${REGISTRY}/${BACKEND_IMAGE}:latest
+                        docker tag ${FRONTEND_IMAGE}:latest ${REGISTRY}/${FRONTEND_IMAGE}:latest
 
-                        docker push nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/blood-donation/blood-donation-app:latest
-
-                        docker image ls
+                        docker push ${REGISTRY}/${BACKEND_IMAGE}:latest
+                        docker push ${REGISTRY}/${FRONTEND_IMAGE}:latest
                     """
                 }
             }
         }
 
-        stage('Deploy Blood Donation App') {
+        stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
                     script {
-                        dir('k8s-deployment') {
+                        dir('k8s') {
                             sh """
-                                kubectl apply -f blood-donation-deployment.yaml
-                                kubectl rollout status deployment/blood-donation-deployment -n 2401021
+                                kubectl apply -f namespace.yaml
+                                kubectl apply -f mongo-deployment.yaml -n blood
+                                kubectl apply -f backend-deployment.yaml -n blood
+                                kubectl apply -f frontend-deployment.yaml -n blood
+                                kubectl apply -f ingress.yaml -n blood
                             """
                         }
                     }
