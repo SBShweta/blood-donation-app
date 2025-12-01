@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-//import axios from 'axios';
+
 import api from "../utils/api";
 
 import { useNavigate } from 'react-router-dom';
 
-//const API_URL = process.env.REACT_APP_API_URL || '/api';
+
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -16,16 +16,16 @@ const Login = () => {
     e.preventDefault();
 
     try {
-      // const response = await axios.post('http://localhost:5000/api/auth/login', { email, password });
+      
       const response = await api.post(`/auth/login`, { email, password });
       const { token, user } = response.data;
 
-      // Save token & user info to localStorage
-      localStorage.setItem('userToken', token); // Store token
-      localStorage.setItem('userInfo', JSON.stringify(user)); // Store user info
-      localStorage.setItem('userRole', user.role); // Store user role
+      
+      localStorage.setItem('userToken', token); 
+      localStorage.setItem('userInfo', JSON.stringify(user)); 
+      localStorage.setItem('userRole', user.role); 
 
-      // Redirect based on role
+      
       if (user.role === 'admin') {
         navigate('/admin-dashboard');
       } else if (user.role === 'donor') {
@@ -33,7 +33,7 @@ const Login = () => {
       } else if (user.role === 'recipient') {
         navigate('/recipient-dashboard');
       } else {
-        navigate('/dashboard'); // fallback
+        navigate('/dashboard'); 
       }
 
     } catch (err) {

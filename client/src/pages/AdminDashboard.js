@@ -1,7 +1,7 @@
-//i am replacing axios to api 
+
 
 import React, { useState, useEffect } from 'react';
-//import axios from 'axios';
+
 import api from "../utils/api";
 
 import { Link } from 'react-router-dom';
@@ -11,10 +11,10 @@ const AdminDashboard = () => {
   const [bloodRequests, setBloodRequests] = useState([]);
   const [error, setError] = useState('');
 
-  // Helper function to get authorization header
+  
   const getAuthHeader = () => {
     const token = localStorage.getItem('userToken');
-    console.log('Token:', token);  // Log the token for debugging
+    console.log('Token:', token);  
     return { headers: { Authorization: `Bearer ${token}` } };
   };
 
@@ -22,7 +22,7 @@ const AdminDashboard = () => {
     const fetchUsers = async () => {
       try {
         const response = await api.get(
-         // 'http://localhost:5000/api/users',
+         
          '/api/users',
           getAuthHeader()
         );
@@ -36,7 +36,7 @@ const AdminDashboard = () => {
     const fetchBloodRequests = async () => {
       try {
         const response = await api.get(
-         // 'http://localhost:5000/api/blood-requests',
+        
          '/api/blood-requests',
           getAuthHeader()
         );
@@ -54,7 +54,7 @@ const AdminDashboard = () => {
   const handleApproveRequest = async (requestId) => {
     try {
       await api.put(
-        //`http://localhost:5000/api/blood-requests/approve/${requestId}`,
+        
         `/api/blood-requests/approve/${requestId}`,
         {},
         getAuthHeader()
@@ -71,7 +71,7 @@ const AdminDashboard = () => {
     try {
       await api.delete(
          `/api/users/${userId}`,
-        //`http://localhost:5000/api/users/${userId}`,
+        
         getAuthHeader()
       );
       alert('User deleted successfully!');

@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-//import axios from 'axios';
+
 import api from "../utils/api";
 
 import { useNavigate } from 'react-router-dom';
 
-//const API_URL = process.env.REACT_APP_API_URL || '/api'; 
 
 const Register = () => {
   const [name, setName] = useState('');
@@ -22,7 +21,7 @@ const Register = () => {
     e.preventDefault();
 
     try {
-      //await axios.post('http://localhost:5000/api/auth/register', 
+       
      await api.post(`/auth/register`, {
         name,
         email,
@@ -35,7 +34,7 @@ const Register = () => {
       });
       navigate('/login');
     } catch (err) {
-      // Check if a specific error message is returned from the backend (e.g., user exists)
+      
       const message = err.response && err.response.data && err.response.data.error
         ? err.response.data.error
         : 'Registration failed. Please try again.';

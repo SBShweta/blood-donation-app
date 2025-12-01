@@ -14,7 +14,7 @@ const DonorDashboard = () => {
         setError('');
         console.log('🔄 Fetching donations...');
         
-        // Check if user is authenticated
+        
         const token = localStorage.getItem('userToken');
         if (!token) {
           setError('Please login again.');

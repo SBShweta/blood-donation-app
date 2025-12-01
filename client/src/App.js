@@ -6,19 +6,19 @@ import Register from "./pages/Register";
 import DonorDashboard from "./pages/DonorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import RecipientDashboard from "./pages/RecipientDashboard";
-import Navbar from "./components/Navbar"; // 👈 Import it
+import Navbar from "./components/Navbar"; 
 import Logout from "./pages/Logout";
 import RequestBlood from "./pages/RequestBlood";
 import DonateBlood from './pages/DonateBlood';
 
 
-//import Layout from "./components/Layout";
+
 
 function App() {
   return (
     <Router>
       
-      <Navbar /> {/* 👈 Add this outside Routes */}
+      <Navbar />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />

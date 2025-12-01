@@ -1,30 +1,12 @@
-// import axios from "axios";
-
-// const api = axios.create({
-//   baseURL: '/api', // points to backend container
-// });
-
-// export default api;
-
-
-// import axios from "axios";
-
-// const api = axios.create({
-//   baseURL: process.env.REACT_APP_API_URL || "http://localhost:5000/api",
-// });
-
-// export default api;
-
-
 
 import axios from "axios";
 
-// Determine base URL based on environment
+
 const getBaseURL = () => {
   if (process.env.NODE_ENV === 'production') {
-    return '/api'; // Relative path for production (nginx proxy)
+    return '/api'; 
   } else {
-    return 'http://localhost:5000/api'; // Direct backend for development
+    return 'http://localhost:5000/api'; 
   }
 };
 
@@ -33,7 +15,7 @@ const api = axios.create({
   timeout: 10000,
 });
 
-// Request interceptor for authentication
+
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('userToken');
@@ -48,7 +30,7 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
