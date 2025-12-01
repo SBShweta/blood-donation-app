@@ -6,7 +6,6 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
-
   - name: sonar-scanner
     image: sonarsource/sonar-scanner-cli
     command: ["cat"]
@@ -28,9 +27,12 @@ spec:
     image: docker:dind
     securityContext:
       privileged: true
-    env:
-    - name: DOCKER_TLS_CERTDIR
-      value: ""
+    command: ["sh", "-c"]
+    args:
+      - |
+        dockerd-entrypoint.sh &
+        sleep 20
+        tail -f /dev/null
     volumeMounts:
     - name: docker-config
       mountPath: /etc/docker/daemon.json
@@ -49,53 +51,56 @@ spec:
 
     environment {
         REGISTRY = "nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"
-        BACKEND_IMAGE = "blood-donation/blood-donation-backend"
-        FRONTEND_IMAGE = "blood-donation/blood-donation-frontend"
+        PROJECT = "2401021-project"
+        SONAR_URL = "http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
     }
 
     stages {
+
+        /* ======================  BUILD BACKEND ======================= */
 
         stage('Build Backend Docker Image') {
             steps {
                 container('dind') {
                     sh """
-                        sleep 8
-                        docker build -t ${BACKEND_IMAGE}:latest -f server/Dockerfile.backend server
+                        docker build -t blood-backend:latest -f server/Dockerfile.backend server
+                        docker image ls
                     """
                 }
             }
         }
+
+        /* ======================  BUILD FRONTEND ======================= */
 
         stage('Build Frontend Docker Image') {
             steps {
                 container('dind') {
                     sh """
-                        docker build -t ${FRONTEND_IMAGE}:latest -f client/Dockerfile.frontend client
+                        docker build -t blood-frontend:latest -f client/Dockerfile.frontend client
+                        docker image ls
                     """
                 }
             }
         }
 
+        /* ======================  SONAR QUBE ======================= */
+
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                    withCredentials([
-                        string(credentialsId: 'sonar-token-2401021', variable: 'SONAR_TOKEN')
-                    ]) {
+                    withCredentials([string(credentialsId: 'sonar-token-2401021', variable: 'SONAR_TOKEN')]) {
                         sh """
-                        sonar-scanner \
-                            -Dsonar.projectKey=2401021_Blood_Donation \
-                            -Dsonar.projectName=2401021_Blood_Donation \
-                            -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
-                            -Dsonar.login=$SONAR_TOKEN \
-                            -Dsonar.sources=./server,./client \
-                            -Dsonar.language=js \
-                            -Dsonar.sourceEncoding=UTF-8
+                            sonar-scanner \
+                            -Dsonar.projectKey=2401021_blood-donation \
+                            -Dsonar.host.url=${SONAR_URL} \
+                            -Dsonar.login=$SONAR_TOKEN
                         """
                     }
                 }
             }
         }
+
+        /* ====================== DOCKER LOGIN ======================= */
 
         stage('Login to Nexus Registry') {
             steps {
@@ -107,37 +112,38 @@ spec:
             }
         }
 
+        /* ====================== TAG & PUSH IMAGES ======================= */
+
         stage('Tag & Push Docker Images') {
             steps {
                 container('dind') {
                     sh """
-                        docker tag ${BACKEND_IMAGE}:latest ${REGISTRY}/${BACKEND_IMAGE}:latest
-                        docker tag ${FRONTEND_IMAGE}:latest ${REGISTRY}/${FRONTEND_IMAGE}:latest
+                        docker tag blood-backend:latest ${REGISTRY}/${PROJECT}/blood-backend:latest
+                        docker tag blood-frontend:latest ${REGISTRY}/${PROJECT}/blood-frontend:latest
 
-                        docker push ${REGISTRY}/${BACKEND_IMAGE}:latest
-                        docker push ${REGISTRY}/${FRONTEND_IMAGE}:latest
+                        docker push ${REGISTRY}/${PROJECT}/blood-backend:latest
+                        docker push ${REGISTRY}/${PROJECT}/blood-frontend:latest
                     """
                 }
             }
         }
 
+        /* ====================== DEPLOY TO K8s ======================= */
+
         stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
-                    script {
-                        dir('k8s') {
-                            sh """
-                                kubectl apply -f namespace.yaml
-                                kubectl apply -f mongo-deployment.yaml -n blood
-                                kubectl apply -f backend-deployment.yaml -n blood
-                                kubectl apply -f frontend-deployment.yaml -n blood
-                                kubectl apply -f ingress.yaml -n blood
-                            """
-                        }
-                    }
+                    sh """
+                        kubectl apply -f k8s/backend-deployment.yaml -n 2401021
+                        kubectl apply -f k8s/frontend-deployment.yaml -n 2401021
+                        kubectl apply -f k8s/mongo-deployment.yaml -n 2401021
+                        kubectl apply -f k8s/ingress.yaml -n 2401021
+                    """
+
+                    sh "kubectl rollout status deployment/blood-backend -n 2401021"
+                    sh "kubectl rollout status deployment/blood-frontend -n 2401021"
                 }
             }
         }
-
     }
 }
