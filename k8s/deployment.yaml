@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: 2401021
+  name: "2401021"
 
 ---
 
@@ -11,7 +11,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: mongo-pvc
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   accessModes:
     - ReadWriteOnce
@@ -26,7 +26,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mongo-deployment
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   replicas: 1
   selector:
@@ -64,7 +64,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mongo-service
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   selector:
     app: mongo
@@ -80,7 +80,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: blood-backend
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   replicas: 1
   selector:
@@ -125,7 +125,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: blood-backend-service
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   selector:
     app: blood-backend
@@ -141,7 +141,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: blood-frontend
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   replicas: 1
   selector:
@@ -167,7 +167,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: blood-frontend-service
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   selector:
     app: blood-frontend
@@ -183,7 +183,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: blood-donation-ingress
-  namespace: 2401021
+  namespace: "2401021"
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
