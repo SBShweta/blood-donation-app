@@ -88,7 +88,7 @@ spec:
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                    withCredentials([string(credentialsId: 'sonar-token-2401021', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([string(credentialsId: '2401021', variable: 'SONAR_TOKEN')]) {
                         sh """
                             sonar-scanner \
                             -Dsonar.projectKey=2401021_blood-donation \
