@@ -6,45 +6,39 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
+
   - name: sonar-scanner
     image: sonarsource/sonar-scanner-cli
-    command: ["cat"]
+    command: ["sleep", "3600"]
     tty: true
 
   - name: kubectl
     image: bitnami/kubectl:latest
-    command: ["cat"]
+    command: ["sleep", "3600"]
     tty: true
     env:
-    - name: KUBECONFIG
-      value: /kube/config
+      - name: KUBECONFIG
+        value: /kube/config
     volumeMounts:
-    - name: kubeconfig-secret
-      mountPath: /kube/config
-      subPath: kubeconfig
+      - name: kubeconfig-secret
+        mountPath: /kube/config
+        subPath: kubeconfig
 
-  - name: dind
-    image: docker:dind
-    securityContext:
-      privileged: true
-    command: ["sh", "-c"]
-    args:
-      - |
-        dockerd-entrypoint.sh &
-        sleep 20
-        tail -f /dev/null
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:latest
+    args: ["--sleep=true"]
     volumeMounts:
-    - name: docker-config
-      mountPath: /etc/docker/daemon.json
-      subPath: daemon.json
+      - name: kaniko-secret
+        mountPath: /kaniko/.docker/
 
   volumes:
-  - name: docker-config
-    configMap:
-      name: docker-daemon-config
-  - name: kubeconfig-secret
-    secret:
-      secretName: kubeconfig-secret
+    - name: kubeconfig-secret
+      secret:
+        secretName: kubeconfig-secret
+
+    - name: kaniko-secret
+      secret:
+        secretName: nexus-docker-secret   # <-- Create this secret in Jenkins namespace
 '''
         }
     }
@@ -57,97 +51,55 @@ spec:
 
     stages {
 
-        
-
-        stage('Build Backend Docker Image') {
-            steps {
-                container('dind') {
-                    sh """
-                        docker build -t blood-backend:latest -f server/Dockerfile.backend server
-                        docker image ls
-                    """
-                }
-            }
-        }
-
-        
-
-        stage('Build Frontend Docker Image') {
-            steps {
-                container('dind') {
-                    sh """
-                        docker build -t blood-frontend:latest -f client/Dockerfile.frontend client
-                        docker image ls
-                    """
-                }
-            }
-        }
-
-        
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                     withCredentials([string(credentialsId: '2401021', variable: 'SONAR_TOKEN')]) {
-                        sh '''
-                            sonar-scanner \
-                                -Dsonar.projectKey=2401021_Blood_Donation \
-                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
-                                -Dsonar.login=$SONAR_TOKEN \
-                                -Dsonar.python.coverage.reportPaths=coverage.xml
-                        '''
+                    withCredentials([string(credentialsId: '2401021', variable: 'SONAR_TOKEN')]) {
+                        sh """
+                        sonar-scanner \
+                            -Dsonar.projectKey=2401021_Blood_Donation \
+                            -Dsonar.host.url=${SONAR_URL} \
+                            -Dsonar.login=$SONAR_TOKEN
+                        """
                     }
                 }
             }
         }
 
-       
-
-        stage('Login to Nexus Registry') {
+        stage('Build Backend Image with Kaniko') {
             steps {
-                container('dind') {
+                container('kaniko') {
                     sh """
-                        docker login ${REGISTRY} -u admin -p Changeme@2025
+                    /kaniko/executor \
+                      --dockerfile=server/Dockerfile.backend \
+                      --context=`pwd` \
+                      --destination=${REGISTRY}/${PROJECT}/blood-backend:latest
                     """
                 }
             }
         }
 
-        
-
-        stage('Tag & Push Docker Images') {
+        stage('Build Frontend Image with Kaniko') {
             steps {
-                container('dind') {
+                container('kaniko') {
                     sh """
-                        docker tag blood-backend:latest ${REGISTRY}/${PROJECT}/blood-backend:latest
-                        docker tag blood-frontend:latest ${REGISTRY}/${PROJECT}/blood-frontend:latest
-
-                        docker push ${REGISTRY}/${PROJECT}/blood-backend:latest
-                        docker push ${REGISTRY}/${PROJECT}/blood-frontend:latest
+                    /kaniko/executor \
+                      --dockerfile=client/Dockerfile.frontend \
+                      --context=`pwd` \
+                      --destination=${REGISTRY}/${PROJECT}/blood-frontend:latest
                     """
                 }
             }
         }
 
-        
-
-         stage('Deploy Application') {
+        stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
-                    script {
-                        
-                            sh '''
-                                # Apply all resources in deployment YAML
-                                 kubectl apply -f k8s/deployment.yaml
-
-                               
-                            '''
-                        
-                    }
+                    sh """
+                    kubectl apply -f k8s/deployment.yaml
+                    """
                 }
             }
         }
     }
 }
-
-
-
