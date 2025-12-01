@@ -91,7 +91,7 @@ spec:
                     withCredentials([string(credentialsId: '2401021', variable: 'SONAR_TOKEN')]) {
                         sh """
                             sonar-scanner \
-                            -Dsonar.projectKey=2401021_blood-donation \
+                            -Dsonar.projectKey=2401021_Blood-Donation \
                             -Dsonar.host.url=${SONAR_URL} \
                             -Dsonar.login=$SONAR_TOKEN
                         """
