@@ -1,7 +1,4 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: blood-donation
-  labels:
-    name: blood-donation
-    environment: production
+  name: 2401021

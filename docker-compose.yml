@@ -6,7 +6,7 @@ services:
     container_name: blood-donation-mongo
     restart: unless-stopped
     ports:
-      - "27018:27017"  
+      - "27018:27017"
     volumes:
       - mongodb_data:/data/db
     environment:
@@ -23,7 +23,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5000
-      - MONGO_URI=mongodb://mongo:27017/blooddonation  # Keep this same (internal Docker network)
+      - MONGO_URI=mongodb://mongo:27017/blooddonation
       - JWT_SECRET=your_super_secure_jwt_secret_key_2024_college_project
     depends_on:
       - mongo
