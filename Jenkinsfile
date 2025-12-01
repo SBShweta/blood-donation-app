@@ -1,4 +1,4 @@
- pipeline {
+pipeline {
     agent {
         kubernetes {
             yaml '''
@@ -15,9 +15,12 @@ spec:
     image: bitnami/kubectl:latest
     command: ["cat"]
     tty: true
+    securityContext:
+      runAsUser: 0
+      readOnlyRootFilesystem: false
     env:
     - name: KUBECONFIG
-      value: /kube/config
+      value: /kube/config        
     volumeMounts:
     - name: kubeconfig-secret
       mountPath: /kube/config
@@ -39,6 +42,7 @@ spec:
   - name: docker-config
     configMap:
       name: docker-daemon-config
+
   - name: kubeconfig-secret
     secret:
       secretName: kubeconfig-secret
@@ -46,52 +50,46 @@ spec:
         }
     }
 
-    environment {
-        SONARQUBE_URL = "http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
-        SONAR_PROJECT_KEY = "2401021_Blood_Donation"
-        SONAR_PROJECT_NAME = "2401021_Blood_Donation"
-        REGISTRY = "nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"
-        NAMESPACE = "2401021"
-    }
-
     stages {
+
+        stage('Build Docker Image') {
+            steps {
+                container('dind') {
+                    sh """
+                        sleep 10
+                        docker build -t blood-donation-app:latest .
+                        docker image ls
+                    """
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                container('dind') {
+                    sh """
+                        docker run --rm blood-donation-app:latest npm test || true
+                    """
+                }
+            }
+        }
 
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                    withCredentials([string(credentialsId: '2401021-SonarQube_token', variable: 'SONAR_TOKEN')]) {
-                        sh '''
+                    withCredentials([string(credentialsId: 'sqp_d523987f0289c0a136a5defed7d70c15694ff380', variable: 'SONAR_TOKEN')]) {
+                        sh """
                             sonar-scanner \
-                              -Dsonar.projectKey='''${SONAR_PROJECT_KEY}''' \
-                              -Dsonar.projectName='''${SONAR_PROJECT_NAME}''' \
-                              -Dsonar.sources=. \
-                              -Dsonar.language=js \
-                              -Dsonar.host.url='''${SONARQUBE_URL}''' \
-                              -Dsonar.login=$SONAR_TOKEN
-                        '''
+                                -Dsonar.projectKey=2401021_Blood_Donation \
+                                -Dsonar.projectName=2401021_Blood_Donation \
+                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
+                                -Dsonar.login=$SONAR_TOKEN \
+                                -Dsonar.sources=. \
+                                -Dsonar.language=js \
+                                -Dsonar.sourceEncoding=UTF-8 \
+                                -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+                        """
                     }
-                }
-            }
-        }
-
-        stage('Build Frontend Docker Image') {
-            steps {
-                container('dind') {
-                    sh '''
-                        cd client
-                        docker build -t blood-donation-app-frontend:latest -f Dockerfile.frontend .
-                    '''
-                }
-            }
-        }
-
-        stage('Build Backend Docker Image') {
-            steps {
-                container('dind') {
-                    sh '''
-                        cd server
-                        docker build -t blood-donation-app-backend:latest -f Dockerfile.backend .
-                    '''
                 }
             }
         }
@@ -99,44 +97,43 @@ spec:
         stage('Login to Nexus Registry') {
             steps {
                 container('dind') {
-                    sh '''
-                        docker login ${REGISTRY} -u admin -p Changeme@2025
-                    '''
+                    sh """
+                        docker login nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085 \
+                        -u admin -p Changeme@2025
+                    """
                 }
             }
         }
 
-        stage('Push Images to Nexus') {
+        stage('Tag & Push Image to Nexus') {
             steps {
                 container('dind') {
-                    sh '''
-                        docker tag blood-donation-app-frontend:latest ${REGISTRY}/blood-app/blood-donation-app-frontend:latest
-                        docker tag blood-donation-app-backend:latest  ${REGISTRY}/blood-app/blood-donation-app-backend:latest
+                    sh """
+                        docker tag blood-donation-app:latest \
+                        nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/blood-donation/blood-donation-app:latest
 
-                        docker push ${REGISTRY}/blood-app/blood-donation-app-frontend:latest
-                        docker push ${REGISTRY}/blood-app/blood-donation-app-backend:latest
-                    '''
+                        docker push nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/blood-donation/blood-donation-app:latest
+
+                        docker image ls
+                    """
                 }
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Deploy Blood Donation App') {
             steps {
                 container('kubectl') {
-                    dir('k8s') {
-                        sh '''
-                            kubectl apply -f namespace.yaml
-                            kubectl apply -f mongo-deployment.yaml -n ${NAMESPACE}
-                            kubectl apply -f backend-deployment.yaml -n ${NAMESPACE}
-                            kubectl apply -f frontend-deployment.yaml -n ${NAMESPACE}
-                            kubectl apply -f ingress.yaml -n ${NAMESPACE}
-
-                            kubectl rollout status deployment/blood-donation-backend -n ${NAMESPACE}
-                            kubectl rollout status deployment/blood-donation-frontend -n ${NAMESPACE}
-                        '''
+                    script {
+                        dir('k8s-deployment') {
+                            sh """
+                                kubectl apply -f blood-donation-deployment.yaml
+                                kubectl rollout status deployment/blood-donation-deployment -n 2401021
+                            """
+                        }
                     }
                 }
             }
         }
+
     }
 }
