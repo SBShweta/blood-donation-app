@@ -57,7 +57,7 @@ spec:
 
     stages {
 
-        /* ======================  BUILD BACKEND ======================= */
+        
 
         stage('Build Backend Docker Image') {
             steps {
@@ -70,7 +70,7 @@ spec:
             }
         }
 
-        /* ======================  BUILD FRONTEND ======================= */
+        
 
         stage('Build Frontend Docker Image') {
             steps {
@@ -83,8 +83,7 @@ spec:
             }
         }
 
-        /* ======================  SONAR QUBE ======================= */
-
+        
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
@@ -101,7 +100,7 @@ spec:
             }
         }
 
-        /* ====================== DOCKER LOGIN ======================= */
+       
 
         stage('Login to Nexus Registry') {
             steps {
@@ -113,7 +112,7 @@ spec:
             }
         }
 
-        /* ====================== TAG & PUSH IMAGES ======================= */
+        
 
         stage('Tag & Push Docker Images') {
             steps {
@@ -129,9 +128,9 @@ spec:
             }
         }
 
-        /* ====================== DEPLOY TO K8s ======================= */
+        
 
-         stage('Deploy AI Application') {
+         stage('Deploy Application') {
             steps {
                 container('kubectl') {
                     script {
