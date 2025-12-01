@@ -131,18 +131,15 @@ spec:
 
         /* ====================== DEPLOY TO K8s ======================= */
 
-        stage('Deploy to Kubernetes') {
+         stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
                     sh """
-                        kubectl apply -f k8s/backend-deployment.yaml -n 2401021
-                        kubectl apply -f k8s/frontend-deployment.yaml -n 2401021
-                        kubectl apply -f k8s/mongo-deployment.yaml -n 2401021
-                        kubectl apply -f k8s/ingress.yaml -n 2401021
+                        kubectl apply -f k8s/deployement.yaml
+                        kubectl rollout status deployment/blood-backend -n 2401021
+                        kubectl rollout status deployment/blood-frontend -n 2401021
+                        kubectl rollout status deployment/mongo-deployment -n 2401021
                     """
-
-                    sh "kubectl rollout status deployment/blood-backend -n 2401021"
-                    sh "kubectl rollout status deployment/blood-frontend -n 2401021"
                 }
             }
         }

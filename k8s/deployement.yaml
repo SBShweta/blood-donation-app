@@ -1,0 +1,201 @@
+# ========================= Namespace =========================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: 2401021
+
+---
+
+# ========================= Persistent Volume Claim for Mongo =========================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+  namespace: 2401021
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+
+# ========================= MongoDB Deployment =========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo-deployment
+  namespace: 2401021
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:6
+          ports:
+            - containerPort: 27017
+          env:
+            - name: MONGO_INITDB_DATABASE
+              value: blooddonation
+            - name: MONGO_INITDB_ROOT_USERNAME
+              value: admin
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              value: admin123
+          volumeMounts:
+            - name: mongo-storage
+              mountPath: /data/db
+      volumes:
+        - name: mongo-storage
+          persistentVolumeClaim:
+            claimName: mongo-pvc
+
+---
+
+# ========================= MongoDB Service =========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-service
+  namespace: 2401021
+spec:
+  selector:
+    app: mongo
+  ports:
+    - port: 27017
+      targetPort: 27017
+  type: ClusterIP
+
+---
+
+# ========================= Backend Deployment =========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blood-backend
+  namespace: 2401021
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blood-backend
+  template:
+    metadata:
+      labels:
+        app: blood-backend
+    spec:
+      imagePullSecrets:
+        - name: nexus-secret
+      containers:
+        - name: backend
+          image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/2401021-project/blood-backend:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: MONGO_URI
+              value: mongodb://admin:admin123@mongo-service:27017/blooddonation
+            - name: JWT_SECRET
+              value: mysecretkey
+            - name: PORT
+              value: "5000"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+
+---
+
+# ========================= Backend Service =========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: blood-backend-service
+  namespace: 2401021
+spec:
+  selector:
+    app: blood-backend
+  ports:
+    - port: 5000
+      targetPort: 5000
+  type: ClusterIP
+
+---
+
+# ========================= Frontend Deployment =========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blood-frontend
+  namespace: 2401021
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blood-frontend
+  template:
+    metadata:
+      labels:
+        app: blood-frontend
+    spec:
+      imagePullSecrets:
+        - name: nexus-secret
+      containers:
+        - name: frontend
+          image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/2401021-project/blood-frontend:latest
+          ports:
+            - containerPort: 80
+
+---
+
+# ========================= Frontend Service =========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: blood-frontend-service
+  namespace: 2401021
+spec:
+  selector:
+    app: blood-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+
+---
+
+# ========================= Ingress =========================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: blood-donation-ingress
+  namespace: 2401021
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: blood.imcc.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: blood-frontend-service
+                port:
+                  number: 80
