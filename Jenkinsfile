@@ -131,49 +131,21 @@ spec:
 
         /* ====================== DEPLOY TO K8s ======================= */
 
-         stage('Deploy to Kubernetes') {
-    steps {
-        container('kubectl') {
-            sh '''
-                echo "Starting Kubernetes deployment..."
-                
-                # Check cluster connection
-                echo "1. Checking cluster connection..."
-                kubectl cluster-info
-                
-                # Ensure namespace exists
-                echo "2. Ensuring namespace exists..."
-                kubectl get namespace 2401021 || kubectl create namespace 2401021
-                
-                # List available files
-                echo "3. Available k8s files:"
-                ls -la k8s/
-                
-                # Check which file exists
-                if [ -f "k8s/deployment.yaml" ]; then
-                    echo "Found: deployment.yaml (correct spelling)"
-                    MANIFEST_FILE="k8s/deployment.yaml"
-                elif [ -f "k8s/deployement.yaml" ]; then
-                    echo "Found: deployement.yaml (typo)"
-                    MANIFEST_FILE="k8s/deployement.yaml"
-                else
-                    echo "ERROR: No deployment file found in k8s/"
-                    exit 1
-                fi
-                
-                # Apply the manifest
-                echo "4. Applying manifest: $MANIFEST_FILE"
-                kubectl apply -f $MANIFEST_FILE -n 2401021
-                
-                # Check deployment status
-                echo "5. Checking deployment status..."
-                sleep 10
-                kubectl get all -n 2401021
-                
-                echo "Deployment completed successfully!"
-            '''
+         stage('Deploy AI Application') {
+            steps {
+                container('kubectl') {
+                    script {
+                        
+                            sh '''
+                                # Apply all resources in deployment YAML
+                                 kubectl apply -f k8s/deployment.yaml
+
+                               
+                            '''
+                        
+                    }
+                }
+            }
         }
-    }
-}
     }
 }
