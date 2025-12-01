@@ -12,8 +12,8 @@ spec:
     tty: true
 
   - name: kubectl
-    image: alpine/k8s:1.28.10  # CHANGED IMAGE
-    command: ["sh", "-c", "tail -f /dev/null"]  # CHANGED COMMAND
+    image: bitnami/kubectl:latest
+    command:["cat"]
     tty: true
     env:
     - name: KUBECONFIG
