@@ -106,7 +106,7 @@ spec:
             }
         }
 
-        stage('Tag & Push Images to Nexus') {
+        stage('Push Images to Nexus') {
             steps {
                 container('dind') {
                     sh '''
@@ -123,19 +123,17 @@ spec:
         stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
-                    script {
-                        dir('k8s') {
-                            sh '''
-                                kubectl apply -f namespace.yaml
-                                kubectl apply -f mongo-deployment.yaml -n ${NAMESPACE}
-                                kubectl apply -f backend-deployment.yaml -n ${NAMESPACE}
-                                kubectl apply -f frontend-deployment.yaml -n ${NAMESPACE}
-                                kubectl apply -f ingress.yaml -n ${NAMESPACE}
+                    dir('k8s') {
+                        sh '''
+                            kubectl apply -f namespace.yaml
+                            kubectl apply -f mongo-deployment.yaml -n ${NAMESPACE}
+                            kubectl apply -f backend-deployment.yaml -n ${NAMESPACE}
+                            kubectl apply -f frontend-deployment.yaml -n ${NAMESPACE}
+                            kubectl apply -f ingress.yaml -n ${NAMESPACE}
 
-                                kubectl rollout status deployment/blood-donation-backend -n ${NAMESPACE}
-                                kubectl rollout status deployment/blood-donation-frontend -n ${NAMESPACE}
-                            '''
-                        }
+                            kubectl rollout status deployment/blood-donation-backend -n ${NAMESPACE}
+                            kubectl rollout status deployment/blood-donation-frontend -n ${NAMESPACE}
+                        '''
                     }
                 }
             }
