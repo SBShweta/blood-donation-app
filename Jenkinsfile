@@ -136,9 +136,7 @@ spec:
                 container('kubectl') {
                     sh """
                         kubectl apply -f k8s/deployement.yaml
-                        kubectl rollout status deployment/blood-backend -n 2401021
-                        kubectl rollout status deployment/blood-frontend -n 2401021
-                        kubectl rollout status deployment/mongo-deployment -n 2401021
+                        
                     """
                 }
             }
