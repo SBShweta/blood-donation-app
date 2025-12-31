@@ -39,6 +39,15 @@ spec:
           env:
             - name: NODE_ENV
               value: "production"
+            - name: PORT
+              value: "5000"
+            - name: MONGO_URI
+              value: "mongodb://mongo:27017/blooddonation"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: blood-donation-secret
+                  key: JWT_SECRET
 
           resources:
             requests:
@@ -138,10 +147,10 @@ spec:
     - host: 2401021.imcc.com
       http:
         paths:
-          - path: /
+          - path: /health
             pathType: Prefix
             backend:
               service:
-                name: frontend-service
+                name: backend-service
                 port:
-                  number: 80
+                  number: 5000
