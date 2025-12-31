@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mongo
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   replicas: 1
   selector:
@@ -29,7 +29,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mongo
-  namespace: 2401021
+  namespace: "2401021"
 spec:
   selector:
     app: mongo
