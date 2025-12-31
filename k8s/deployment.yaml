@@ -1,85 +1,19 @@
-# ========================= Namespace =========================
+# -------------------------------
+# Namespace
+# -------------------------------
 apiVersion: v1
 kind: Namespace
 metadata:
   name: "2401021"
 
 ---
-
-# ========================= Persistent Volume Claim for Mongo =========================
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mongo-pvc
-  namespace: "2401021"
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-
----
-
-# ========================= MongoDB Deployment =========================
+# -------------------------------
+# Backend Deployment
+# -------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mongo-deployment
-  namespace: "2401021"
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mongo
-  template:
-    metadata:
-      labels:
-        app: mongo
-    spec:
-      containers:
-        - name: mongo
-          image: mongo:6
-          ports:
-            - containerPort: 27017
-          env:
-            - name: MONGO_INITDB_DATABASE
-              value: blooddonation
-            - name: MONGO_INITDB_ROOT_USERNAME
-              value: admin
-            - name: MONGO_INITDB_ROOT_PASSWORD
-              value: admin123
-          volumeMounts:
-            - name: mongo-storage
-              mountPath: /data/db
-      volumes:
-        - name: mongo-storage
-          persistentVolumeClaim:
-            claimName: mongo-pvc
-
----
-
-# ========================= MongoDB Service =========================
-apiVersion: v1
-kind: Service
-metadata:
-  name: mongo-service
-  namespace: "2401021"
-spec:
-  selector:
-    app: mongo
-  ports:
-    - port: 27017
-      targetPort: 27017
-  type: ClusterIP
-
----
-
-# ========================= Backend Deployment =========================
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: blood-backend
+  name: backend-deployment
   namespace: "2401021"
 spec:
   replicas: 1
@@ -93,54 +27,53 @@ spec:
     spec:
       imagePullSecrets:
         - name: nexus-secret
+
       containers:
         - name: backend
-          image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/2401021-project/blood-backend:latest
+          image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/240102s2401021/blood-donation-backend:latest
+          imagePullPolicy: Always
+
           ports:
             - containerPort: 5000
+
           env:
-            - name: MONGO_URI
-              value: mongodb://admin:admin123@mongo-service:27017/blooddonation
-            - name: JWT_SECRET
-              value: mysecretkey
-            - name: PORT
-              value: "5000"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 5000
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 5000
-            initialDelaySeconds: 20
-            periodSeconds: 20
+            - name: NODE_ENV
+              value: "production"
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
 
 ---
-
-# ========================= Backend Service =========================
+# -------------------------------
+# Backend Service
+# -------------------------------
 apiVersion: v1
 kind: Service
 metadata:
-  name: blood-backend-service
+  name: backend-service
   namespace: "2401021"
 spec:
   selector:
     app: blood-backend
   ports:
-    - port: 5000
+    - protocol: TCP
+      port: 5000
       targetPort: 5000
   type: ClusterIP
 
 ---
-
-# ========================= Frontend Deployment =========================
+# -------------------------------
+# Frontend Deployment
+# -------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: blood-frontend
+  name: frontend-deployment
   namespace: "2401021"
 spec:
   replicas: 1
@@ -154,31 +87,45 @@ spec:
     spec:
       imagePullSecrets:
         - name: nexus-secret
+
       containers:
         - name: frontend
-          image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/2401021-project/blood-frontend:latest
+          image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/2401021/blood-donation-frontend:latest
+          imagePullPolicy: Always
+
           ports:
             - containerPort: 80
 
----
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "128Mi"
+            limits:
+              cpu: "400m"
+              memory: "256Mi"
 
-# ========================= Frontend Service =========================
+---
+# -------------------------------
+# Frontend Service
+# -------------------------------
 apiVersion: v1
 kind: Service
 metadata:
-  name: blood-frontend-service
+  name: frontend-service
   namespace: "2401021"
 spec:
   selector:
     app: blood-frontend
   ports:
-    - port: 80
+    - protocol: TCP
+      port: 80
       targetPort: 80
   type: ClusterIP
 
 ---
-
-# ========================= Ingress =========================
+# -------------------------------
+# Ingress
+# -------------------------------
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -196,6 +143,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: blood-frontend-service
+                name: frontend-service
                 port:
                   number: 80
