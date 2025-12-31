@@ -151,6 +151,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: backend-service
+                name: frontend-service
                 port:
-                  number: 5000
+                  number: 80
