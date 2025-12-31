@@ -42,7 +42,7 @@ spec:
             - name: PORT
               value: "5000"
             - name: MONGO_URI
-              value: "mongodb://mongo:27017/blooddonation"
+              value: "mongodb+srv://birajdarshweta123:birajdarshweta123@cluster0.hw0y3fw.mongodb.net/?appName=Cluster0"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
