@@ -95,7 +95,7 @@ spec:
                     sh '''
                         cd client
                         docker build -f Dockerfile.frontend \
-                          -t $FRONTEND_APP:$IMAGE_TAG .+-
+                          -t $FRONTEND_APP:$IMAGE_TAG .
                     '''
                 }
             }
