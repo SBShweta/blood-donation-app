@@ -30,7 +30,7 @@ spec:
 
       containers:
         - name: backend
-          image: 127.0.0.1:30085/240102s2401021/blood-donation-backend:latest
+          image: 127.0.0.1:30085/2401021/blood-donation-backend:latest
           imagePullPolicy: Always
 
           ports:
