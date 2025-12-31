@@ -147,7 +147,7 @@ spec:
                         kubectl apply -f k8s/deployment.yaml -n $NAMESPACE
                         kubectl rollout status deployment/frontend-deployment -n $NAMESPACE
                         kubectl rollout status deployment/backend-deployment -n $NAMESPACE
-                        kubectl apply -f k8s/mongo.yaml -n $NAMESPACE
+                       
 
                     '''
                 }
