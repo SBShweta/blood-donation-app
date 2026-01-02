@@ -39,16 +39,10 @@ spec:
           env:
             - name: NODE_ENV
               value: "production"
-            - name: PORT
-              value: "5000"
-            - name: MONGO_URI
-              value: "mongodb+srv://birajdarshweta123:birajdarshweta123@cluster0.hw0y3fw.mongodb.net/?appName=Cluster0"
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: blood-donation-secret
-                  key: JWT_SECRET
 
+            - name: MONGO_URI
+              value: "mongodb+srv://birajdarshweta11:Alakn@nda11@cluster0.oeyhfkr.mongodb.net/?retryWrites=true"
+           
           resources:
             requests:
               cpu: "250m"
@@ -154,3 +148,6 @@ spec:
                 name: frontend-service
                 port:
                   number: 80
+
+
+
