@@ -141,7 +141,7 @@ spec:
     - host: 2401021.imcc.com
       http:
         paths:
-          - path: /health
+          - path: /
             pathType: Prefix
             backend:
               service:
